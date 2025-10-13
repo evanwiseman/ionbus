@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ========================
@@ -52,15 +54,27 @@ type MQTTConfig struct {
 	QoS           byte
 	KeepAlive     time.Duration
 	CleanSession  bool
+	ClientID      string
+	Username      string
+	Password      string
 }
 
-func LoadMQTTConfig() MQTTConfig {
+func LoadMQTTConfig(role string) MQTTConfig {
 	mqttPort := getEnvInt("MQTT_PORT", 1883)
 	mqttWS := getEnvInt("MQTT_WS_PORT", 9001)
-	mqttUrl := getEnvString("MQTT_URL", fmt.Sprintf("mqtt://mqtt-broker:%d", mqttPort))
+	mqttUrl := getEnvString("MQTT_URL", fmt.Sprintf("mqtt://localhost:%d", mqttPort))
 	mqttQoS := byte(getEnvInt("MQTT_QOS", 1))
 	mqttKeepAlive := time.Duration(getEnvInt("MQTT_KEEPALIVE", 30)) * time.Second
 	mqttCleanSession := getEnvBool("MQTT_CLEAN_SESSION", false)
+	mqttClientID := fmt.Sprintf(
+		"%s-%s-%s",
+		getEnvString("MQTT_CLIENT_ID", "ionbus-server"),
+		role,
+		uuid.New().String(),
+	)
+	mqttUsername := getEnvString("MQTT_USERNAME", "")
+	mqttPassword := getEnvString("MQTT_PASSWORD", "")
+
 	return MQTTConfig{
 		Port:          mqttPort,
 		WebSocketPort: mqttWS,
@@ -68,6 +82,9 @@ func LoadMQTTConfig() MQTTConfig {
 		QoS:           mqttQoS,
 		KeepAlive:     mqttKeepAlive,
 		CleanSession:  mqttCleanSession,
+		ClientID:      mqttClientID,
+		Username:      mqttUsername,
+		Password:      mqttPassword,
 	}
 }
 
@@ -81,7 +98,8 @@ type RabbitConfig struct {
 
 func LoadRabbitConfig() RabbitConfig {
 	rabbitPort := getEnvInt("RABBIT_PORT", 5672)
-	rabbitUrl := getEnvString("RABBIT_URL", fmt.Sprintf("amqp://guest:guest@rabbitmq:%d/", rabbitPort))
+	rabbitUrl := getEnvString("RABBIT_URL", fmt.Sprintf("amqp://guest:guest@localhost:%d/", rabbitPort))
+
 	return RabbitConfig{
 		Port: rabbitPort,
 		Url:  rabbitUrl,
@@ -99,23 +117,24 @@ type PostgresConfig struct {
 }
 
 func LoadPostgresConfig() PostgresConfig {
-	postgresUser := getEnvString("POSTGRES_USER", "ionbus")
-	postgresPassword := getEnvString("POSTGRES_PASSWORD", "ionbus")
-	postgresPort := getEnvInt("POSTGRES_PORT", 5432)
-	postgresUrl := getEnvString(
+	// ==== Postgres ====
+	pgUser := getEnvString("POSTGRES_USER", "ionbus")
+	pgPassword := getEnvString("POSTGRES_PASSWORD", "ionbus")
+	pgPort := getEnvInt("POSTGRES_PORT", 5432)
+	pgUrl := getEnvString(
 		"POSTGRES_URL",
 		fmt.Sprintf(
-			"postgres://%v:%v@postgres:%v/ionbus?sslmode=disable",
-			postgresUser,
-			postgresPassword,
-			postgresPort,
+			"postgres://%v:%v@localhost:%v/ionbus?sslmode=disable",
+			pgUser,
+			pgPassword,
+			pgPort,
 		),
 	)
 	return PostgresConfig{
-		User:     postgresUser,
-		Password: postgresPassword,
-		Port:     postgresPort,
-		Url:      postgresUrl,
+		User:     pgUser,
+		Password: pgPassword,
+		Port:     pgPort,
+		Url:      pgUrl,
 	}
 }
 
@@ -127,32 +146,7 @@ type LogConfig struct {
 }
 
 func LoadLogConfig() LogConfig {
-	logLevel := getEnvString("LOG_LEVEL", "debug")
 	return LogConfig{
-		Level: logLevel,
-	}
-}
-
-// ========================
-// Server Config
-// ========================
-type ServerConfig struct {
-	MQTT     MQTTConfig
-	Rabbit   RabbitConfig
-	Postgres PostgresConfig
-	Log      LogConfig
-}
-
-func LoadServerConfig() ServerConfig {
-	mqttConfig := LoadMQTTConfig()
-	rabbitConfig := LoadRabbitConfig()
-	postgresConfig := LoadPostgresConfig()
-	logConfig := LoadLogConfig()
-
-	return ServerConfig{
-		MQTT:     mqttConfig,
-		Rabbit:   rabbitConfig,
-		Postgres: postgresConfig,
-		Log:      logConfig,
+		Level: getEnvString("LOG_LEVEL", "debug"),
 	}
 }
