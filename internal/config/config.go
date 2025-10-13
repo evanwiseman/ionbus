@@ -132,3 +132,27 @@ func LoadLogConfig() LogConfig {
 		Level: logLevel,
 	}
 }
+
+// ========================
+// Server Config
+// ========================
+type ServerConfig struct {
+	MQTT     MQTTConfig
+	Rabbit   RabbitConfig
+	Postgres PostgresConfig
+	Log      LogConfig
+}
+
+func LoadServerConfig() ServerConfig {
+	mqttConfig := LoadMQTTConfig()
+	rabbitConfig := LoadRabbitConfig()
+	postgresConfig := LoadPostgresConfig()
+	logConfig := LoadLogConfig()
+
+	return ServerConfig{
+		MQTT:     mqttConfig,
+		Rabbit:   rabbitConfig,
+		Postgres: postgresConfig,
+		Log:      logConfig,
+	}
+}
