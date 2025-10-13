@@ -1,1 +1,7 @@
-package client
+package main
+
+import "log"
+
+func main() {
+	log.Println("Starting ionbus client...")
+}
