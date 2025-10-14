@@ -1,8 +1,6 @@
 package mqttx
 
 import (
-	"log"
-
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/config"
 )
@@ -20,6 +18,5 @@ func NewClient(mc config.MQTTConfig) (mqtt.Client, error) {
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		return nil, token.Error()
 	}
-	log.Println("Successfully connected to MQTT broker")
 	return client, nil
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"os"
 	"os/signal"
@@ -12,11 +11,10 @@ import (
 	"github.com/evanwiseman/ionbus/internal/brokers/mqttx"
 	"github.com/evanwiseman/ionbus/internal/config"
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 )
 
 func cleanup() {
-	log.Println("Stopping ionbus server...")
+	log.Print("Stopping ionbus hub... ")
 }
 
 func main() {
@@ -43,7 +41,7 @@ func main() {
 }
 
 func run(ctx context.Context) {
-	log.Println("Starting ionbus server...")
+	log.Println("Starting ionbus hub...")
 
 	// ========================
 	// Start RabbitMQ
@@ -61,25 +59,21 @@ func run(ctx context.Context) {
 	// Start MQTT
 	// ========================
 	log.Println("Connecting to MQTT...")
-	mqttConfig := config.LoadMQTTConfig("server")
+	mqttConfig := config.LoadMQTTConfig("client")
 	mqttClient, err := mqttx.NewClient(mqttConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to MQTT: %v\n", err)
 	}
 	defer mqttClient.Disconnect(250)
-	log.Println("Successfully connected to MQTT")
 
 	// ========================
-	// Open Postgres Database
+	// Subscribe to MQTT Topics
 	// ========================
-	log.Println("Connecting to database...")
-	pgConfig := config.LoadPostgresConfig()
-	db, err := sql.Open("postgres", pgConfig.Url)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v\n", err)
-	}
-	defer db.Close()
-	log.Println("Successfully connected to database")
+
+	// ========================
+	// Confirm hub is started
+	// ========================
+	log.Println("Successfully started ionbus hub")
 
 	// ========================
 	// Wait for cancellation
