@@ -2,18 +2,25 @@ package bridge
 
 import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Bridge struct {
-	rmqCh      *amqp.Channel
-	mqttClient mqtt.Client
+	RMQCh      *amqp.Channel
+	MQTTClient mqtt.Client
 }
 
-func (b *Bridge) RMQToMQTT() error {
-	return nil
+type RMQBridgeOptions struct {
+	QueueName   string
+	ContentType routing.ContentType
+	MQTTTopic   string
+	Qos         byte
 }
 
-func (b *Bridge) MQTTToRMQ() error {
-	return nil
+type MQTTBridgeOptions struct {
+	Topic       string
+	ContentType routing.ContentType
+	RMQExchange string
+	RMQKey      string
 }
