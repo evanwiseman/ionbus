@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/evanwiseman/ionbus/internal/brokers/amqpx"
-	"github.com/evanwiseman/ionbus/internal/brokers/mqttx"
 	"github.com/evanwiseman/ionbus/internal/config"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -56,18 +55,6 @@ func run(ctx context.Context) {
 	}
 	defer rabbitConn.Close()
 	log.Println("Sucessfully connected to RabbitMQ")
-
-	// ========================
-	// Start MQTT
-	// ========================
-	log.Println("Connecting to MQTT...")
-	mqttConfig := config.LoadMQTTConfig("server")
-	mqttClient, err := mqttx.NewClient(mqttConfig)
-	if err != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", err)
-	}
-	defer mqttClient.Disconnect(250)
-	log.Println("Successfully connected to MQTT")
 
 	// ========================
 	// Open Postgres Database

@@ -14,7 +14,7 @@ import (
 )
 
 func cleanup() {
-	log.Print("Stopping ionbus hub... ")
+	log.Print("Stopping ionbus node... ")
 }
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
 }
 
 func run(ctx context.Context) {
-	log.Println("Starting ionbus hub...")
+	log.Println("Starting ionbus node...")
 
 	// ========================
 	// Start RabbitMQ
