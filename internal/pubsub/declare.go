@@ -1,4 +1,4 @@
-package amqpx
+package pubsub
 
 import (
 	"github.com/evanwiseman/ionbus/internal/routing"

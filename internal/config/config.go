@@ -68,7 +68,7 @@ func LoadMQTTConfig(role string) MQTTConfig {
 	mqttCleanSession := getEnvBool("MQTT_CLEAN_SESSION", false)
 	mqttClientID := fmt.Sprintf(
 		"%s-%s-%s",
-		getEnvString("MQTT_CLIENT_ID", "ionbus-server"),
+		getEnvString("MQTT_CLIENT_ID", "ionbus-node"),
 		role,
 		uuid.New().String(),
 	)

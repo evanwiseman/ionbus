@@ -7,9 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/brokers/amqpx"
-	"github.com/evanwiseman/ionbus/internal/brokers/mqttx"
-	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/node"
 	"github.com/joho/godotenv"
 )
 
@@ -44,11 +42,21 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus node...")
 
 	// ========================
+	// Start MQTT
+	// ========================
+	log.Println("Connecting to MQTT...")
+	mqttClient, err := node.StartMQTT()
+	if err != nil {
+		log.Fatalf("Failed to connect to MQTT: %v\n", err)
+	}
+	defer mqttClient.Disconnect(250)
+	log.Println("Successfully connected to MQTT")
+
+	// ========================
 	// Start RabbitMQ
 	// ========================
 	log.Println("Connecting to RabbitMQ...")
-	rabbitConfig := config.LoadRabbitConfig()
-	rabbitConn, err := amqpx.NewConnection(rabbitConfig)
+	rabbitConn, err := node.StartRMQ()
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
@@ -56,24 +64,13 @@ func run(ctx context.Context) {
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
-	// Start MQTT
-	// ========================
-	log.Println("Connecting to MQTT...")
-	mqttConfig := config.LoadMQTTConfig("client")
-	mqttClient, err := mqttx.NewClient(mqttConfig)
-	if err != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", err)
-	}
-	defer mqttClient.Disconnect(250)
-
-	// ========================
 	// Subscribe to MQTT Topics
 	// ========================
 
 	// ========================
-	// Confirm hub is started
+	// Confirm node is started
 	// ========================
-	log.Println("Successfully started ionbus hub")
+	log.Println("Successfully started ionbus node")
 
 	// ========================
 	// Wait for cancellation

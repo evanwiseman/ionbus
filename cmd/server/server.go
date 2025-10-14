@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/brokers/amqpx"
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/server"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -48,8 +48,7 @@ func run(ctx context.Context) {
 	// Start RabbitMQ
 	// ========================
 	log.Println("Connecting to RabbitMQ...")
-	rabbitConfig := config.LoadRabbitConfig()
-	rabbitConn, err := amqpx.NewConnection(rabbitConfig)
+	rabbitConn, err := server.StartRMQ()
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
