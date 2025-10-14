@@ -13,26 +13,25 @@ import (
 
 func SubscribeRMQ[T any](
 	ctx context.Context,
-	conn *amqp.Connection,
 	ch *amqp.Channel,
-	queueName string,
-	prefetch int,
+	opts RMQSubscribeOptions,
 	contentType routing.ContentType,
 	handler func(T) routing.AckType,
 ) error {
 	// Limit prefetch so other servers can clean process queue
-	if err := ch.Qos(prefetch, 0, false); err != nil {
+	if err := ch.Qos(opts.PrefetchCount, opts.PrefetchSize, opts.QosGlobal); err != nil {
 		return fmt.Errorf("failed to set QoS: %w", err)
 	}
+
 	// Get a chan of deliveries by consuming message
 	msgs, err := ch.Consume(
-		queueName,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
+		opts.QueueName,
+		opts.Consumer,
+		opts.AutoAck,
+		opts.Exclusive,
+		opts.NoLocal,
+		opts.NoWait,
+		opts.Args,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe: %w", err)
@@ -76,13 +75,13 @@ func SubscribeRMQ[T any](
 }
 
 func SubscribeMQTT[T any](
+	ctx context.Context,
 	client mqtt.Client,
-	topic string,
-	qos byte,
+	opts MQTTSubscribeOptions,
 	contentType routing.ContentType,
 	handler func(T) routing.AckType, // for consistency with rmq
 ) error {
-	token := client.Subscribe(topic, qos, func(client mqtt.Client, msg mqtt.Message) {
+	token := client.Subscribe(opts.Topic, opts.Qos, func(client mqtt.Client, msg mqtt.Message) {
 		var obj T
 
 		if err := routing.Unmarshal(msg.Payload(), contentType, &obj); err != nil {
@@ -94,11 +93,20 @@ func SubscribeMQTT[T any](
 
 	// Wait for subscription acknowledgment with a timeout
 	if !token.WaitTimeout(5 * time.Second) {
-		return fmt.Errorf("timeout waiting for subscription to topic %s", topic)
+		return fmt.Errorf("timeout waiting for subscription to topic %s", opts.Topic)
 	}
 
 	if err := token.Error(); err != nil {
 		return fmt.Errorf("failed to subscribe: %w", err)
 	}
+
+	// Run a goroutine to handle context cancellation
+	go func() {
+		<-ctx.Done()
+		log.Printf("Context cancelled, unsubscribing from topic %s", opts.Topic)
+		unsub := client.Unsubscribe(opts.Topic)
+		unsub.WaitTimeout(3 * time.Second)
+	}()
+
 	return nil
 }
