@@ -1,0 +1,47 @@
+name: ionbus
+
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: docker/server/Dockerfile
+    container_name: ionbus_server
+    env_file:
+      - .env
+    ports:
+      - "${RMQ_PORT}:${RMQ_PORT}" # RabbitMQ AMQP
+      - "15672:15672"                       # RabbitMQ Management
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}" # Postgres DB
+      - "${API_PORT}:${API_PORT}"           # RESTful API
+    depends_on:
+      - rabbitmq
+      - postgres
+    restart: unless-stopped
+  
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ionbus_rmq
+    env_file:
+      - .env
+    ports:
+      - "${RMQ_PORT}:${RMQ_PORT}"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+
+  postgres:
+    image: postgres:15
+    container_name: ionbus_db
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT}:${API_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+  postgres_data:

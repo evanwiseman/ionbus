@@ -1,0 +1,11 @@
+name: ionbus
+
+services:
+  client:
+    build:
+      context: ../..
+      dockerfile: docker/client/Dockerfile
+    container_name: ionbus_client
+    env_file:
+      - .env
+    restart: unless-stopped
