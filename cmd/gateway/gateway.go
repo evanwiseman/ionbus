@@ -7,12 +7,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/node"
+	"github.com/evanwiseman/ionbus/internal/gateway"
 	"github.com/joho/godotenv"
 )
 
 func cleanup() {
-	log.Print("Stopping ionbus node... ")
+	log.Print("Stopping ionbus gateway... ")
 }
 
 func main() {
@@ -39,13 +39,13 @@ func main() {
 }
 
 func run(ctx context.Context) {
-	log.Println("Starting ionbus node...")
+	log.Println("Starting ionbus gateway...")
 
 	// ========================
 	// Start MQTT
 	// ========================
 	log.Println("Connecting to MQTT...")
-	mqttClient, err := node.StartMQTT()
+	mqttClient, err := gateway.StartMQTT()
 	if err != nil {
 		log.Fatalf("Failed to connect to MQTT: %v\n", err)
 	}
@@ -56,7 +56,7 @@ func run(ctx context.Context) {
 	// Start RabbitMQ
 	// ========================
 	log.Println("Connecting to RabbitMQ...")
-	rabbitConn, err := node.StartRMQ()
+	rabbitConn, err := gateway.StartRMQ()
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
@@ -68,9 +68,9 @@ func run(ctx context.Context) {
 	// ========================
 
 	// ========================
-	// Confirm node is started
+	// Confirm gateway is started
 	// ========================
-	log.Println("Successfully started ionbus node")
+	log.Println("Successfully started ionbus gateway")
 
 	// ========================
 	// Wait for cancellation

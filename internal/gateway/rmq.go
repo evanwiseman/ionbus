@@ -1,4 +1,4 @@
-package node
+package gateway
 
 import (
 	"github.com/evanwiseman/ionbus/internal/config"

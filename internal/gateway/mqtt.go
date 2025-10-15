@@ -1,4 +1,4 @@
-package node
+package gateway
 
 import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
