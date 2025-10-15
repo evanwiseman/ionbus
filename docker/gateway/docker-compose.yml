@@ -12,7 +12,7 @@ services:
         - "${MQTT_PORT}:${MQTT_PORT}"
         - "${MQTT_WS_PORT}:${MQTT_WS_PORT}"
       depends_on:
-        - mqtt-broker
+        - gateway-mqtt-broker
       restart: unless-stopped
 
   gateway-mqtt-broker:

@@ -8,6 +8,8 @@ services:
     container_name: ionbus_client
     env_file:
       - .env
+    depends_on:
+      - client-mqtt-broker
     restart: unless-stopped
 
   client-mqtt-broker:
@@ -15,9 +17,6 @@ services:
     container_name: ionbus_client_mqtt
     env_file:
       - .env
-    ports:
-      - "${MQTT_PORT}:${MQTT_PORT}"
-      - "${MQTT_WS_PORT}:${MQTT_WS_PORT}"
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
       - mqtt_data:/mosquitto/data
