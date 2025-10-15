@@ -62,9 +62,3 @@ const (
 	Durable SimpleQueueType = iota
 	Transient
 )
-
-type Message struct {
-	Topic       string
-	Payload     []byte
-	ContentType ContentType
-}
