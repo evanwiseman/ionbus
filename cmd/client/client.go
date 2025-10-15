@@ -7,7 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/evanwiseman/ionbus/internal/broker"
+	"github.com/evanwiseman/ionbus/internal/client"
 	"github.com/joho/godotenv"
+)
+
+const (
+	envFile = "docker/client/.env" // Change to ".env" for docker deployment
 )
 
 func cleanup() {
@@ -15,8 +21,6 @@ func cleanup() {
 }
 
 func main() {
-	godotenv.Load()
-
 	// Listen for OS signals
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -39,6 +43,27 @@ func main() {
 
 func run(ctx context.Context) {
 	log.Println("Starting ionbus client...")
+
+	// Load from .env update
+	err := godotenv.Load(envFile)
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+	cfg, err := client.LoadClientConfig()
+	if err != nil {
+		log.Fatalf("Failed to get server config: %v\n", err)
+	}
+
+	// ========================
+	// Start MQTT
+	// ========================
+	log.Println("Connecting to MQTT...")
+	mqttClient, err := broker.StartMQTT(cfg.MQTT, cfg.ID)
+	if err != nil {
+		log.Fatalf("Failed to connect to MQTT: %v\n", err)
+	}
+	defer mqttClient.Disconnect(250)
+	log.Println("Successfully connected to MQTT")
 
 	// ========================
 	// Wait for cancellation

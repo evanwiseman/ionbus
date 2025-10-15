@@ -9,3 +9,23 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+
+  client-mqtt-broker:
+    image: eclipse-mosquitto:2.0.15
+    container_name: ionbus_client_mqtt
+    env_file:
+      - .env
+    ports:
+      - "${MQTT_PORT}:${MQTT_PORT}"
+      - "${MQTT_WS_PORT}:${MQTT_WS_PORT}"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+  postgres_data:
+  mqtt_data:
+  mqtt_log:

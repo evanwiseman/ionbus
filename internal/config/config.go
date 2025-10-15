@@ -5,148 +5,149 @@ import (
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/google/uuid"
 )
 
-// ========================
-// Helpers
-// ========================
-func getEnvString(key, defaultVal string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		return defaultVal
-	}
-	return val
-}
-
-func getEnvInt(key string, defaultVal int) int {
-	val := os.Getenv(key)
-	if val == "" {
-		return defaultVal
-	}
-	n, err := strconv.Atoi(val)
-	if err != nil {
-		return defaultVal
-	}
-	return n
-}
-
-func getEnvBool(key string, defaultVal bool) bool {
-	val := os.Getenv(key)
-	if val == "" {
-		return defaultVal
-	}
-	b, err := strconv.ParseBool(val)
-	if err != nil {
-		return defaultVal
-	}
-	return b
-}
-
-// ========================
-// MQTT Config
-// ========================
 type MQTTConfig struct {
+	Schema        string
+	Broker        string
 	Port          int
 	WebSocketPort int
-	Url           string
+	Username      string
+	Password      string
 	QoS           byte
 	KeepAlive     time.Duration
 	CleanSession  bool
 	ClientID      string
-	Username      string
-	Password      string
 }
 
-func LoadMQTTConfig(role string) MQTTConfig {
-	mqttPort := getEnvInt("MQTT_PORT", 1883)
-	mqttWS := getEnvInt("MQTT_WS_PORT", 9001)
-	mqttUrl := getEnvString("MQTT_URL", fmt.Sprintf("mqtt://localhost:%d", mqttPort))
-	mqttQoS := byte(getEnvInt("MQTT_QOS", 1))
-	mqttKeepAlive := time.Duration(getEnvInt("MQTT_KEEPALIVE", 30)) * time.Second
-	mqttCleanSession := getEnvBool("MQTT_CLEAN_SESSION", false)
-	mqttClientID := fmt.Sprintf(
-		"%s-%s-%s",
-		getEnvString("MQTT_CLIENT_ID", "ionbus-node"),
-		role,
-		uuid.New().String(),
-	)
-	mqttUsername := getEnvString("MQTT_USERNAME", "")
-	mqttPassword := getEnvString("MQTT_PASSWORD", "")
+func (mc MQTTConfig) GetUrl() string {
+	return fmt.Sprintf("%v://%v:%v", mc.Schema, mc.Broker, mc.Port)
+}
+
+func LoadMQTTConfig() (MQTTConfig, error) {
+	mqttSchema := os.Getenv("MQTT_SCHEMA")
+	mqttBroker := os.Getenv("MQTT_BROKER")
+	mqttPort, err := strconv.Atoi(os.Getenv("MQTT_PORT"))
+	if err != nil {
+		return MQTTConfig{}, err
+	}
+	mqttWebSocketPort, err := strconv.Atoi(os.Getenv("MQTT_WS_PORT"))
+	if err != nil {
+		return MQTTConfig{}, err
+	}
+	mqttUsername := os.Getenv("MQTT_USERNAME")
+	mqttPassword := os.Getenv("MQTT_PASSWORD")
+	mqttQoSInt, err := strconv.Atoi(os.Getenv("MQTT_QOS"))
+	if err != nil {
+		return MQTTConfig{}, err
+	}
+	mqttQoS := byte(mqttQoSInt)
+	mqttKeepAlive, err := time.ParseDuration(os.Getenv("MQTT_KEEPALIVE"))
+	if err != nil {
+		return MQTTConfig{}, err
+	}
+	mqttCleanSession, err := strconv.ParseBool(os.Getenv("MQTT_CLEAN_SESSION"))
+	if err != nil {
+		return MQTTConfig{}, err
+	}
 
 	return MQTTConfig{
+		Schema:        mqttSchema,
+		Broker:        mqttBroker,
 		Port:          mqttPort,
-		WebSocketPort: mqttWS,
-		Url:           mqttUrl,
+		WebSocketPort: mqttWebSocketPort,
+		Username:      mqttUsername,
+		Password:      mqttPassword,
 		QoS:           mqttQoS,
 		KeepAlive:     mqttKeepAlive,
 		CleanSession:  mqttCleanSession,
-		ClientID:      mqttClientID,
-		Username:      mqttUsername,
-		Password:      mqttPassword,
-	}
+	}, nil
 }
 
-// ========================
-// RabbitMQ Config
-// ========================
-type RabbitConfig struct {
-	Port int
-	Url  string
-}
-
-func LoadRabbitConfig() RabbitConfig {
-	rabbitPort := getEnvInt("RABBIT_PORT", 5672)
-	rabbitUrl := getEnvString("RABBIT_URL", fmt.Sprintf("amqp://guest:guest@localhost:%d/", rabbitPort))
-
-	return RabbitConfig{
-		Port: rabbitPort,
-		Url:  rabbitUrl,
-	}
-}
-
-// ========================
-// Postgres Config
-// ========================
-type PostgresConfig struct {
-	User     string
-	Password string
+type RMQConfig struct {
+	Schema   string
+	Host     string
 	Port     int
-	Url      string
+	Username string
+	Password string
+	VHost    string
+	TLS      bool
 }
 
-func LoadPostgresConfig() PostgresConfig {
-	// ==== Postgres ====
-	pgUser := getEnvString("POSTGRES_USER", "ionbus")
-	pgPassword := getEnvString("POSTGRES_PASSWORD", "ionbus")
-	pgPort := getEnvInt("POSTGRES_PORT", 5432)
-	pgUrl := getEnvString(
-		"POSTGRES_URL",
-		fmt.Sprintf(
-			"postgres://%v:%v@localhost:%v/ionbus?sslmode=disable",
-			pgUser,
-			pgPassword,
-			pgPort,
-		),
-	)
-	return PostgresConfig{
-		User:     pgUser,
-		Password: pgPassword,
-		Port:     pgPort,
-		Url:      pgUrl,
+func (rmq RMQConfig) GetUrl() string {
+	return fmt.Sprintf("%v://%v:%v", rmq.Schema, rmq.Host, rmq.Port)
+}
+
+func LoadRMQConfig() (RMQConfig, error) {
+	rmqSchema := os.Getenv("RMQ_SCHEMA")
+	rmqHost := os.Getenv("RMQ_HOST")
+	rmqPort, err := strconv.Atoi(os.Getenv("RMQ_PORT"))
+	if err != nil {
+		return RMQConfig{}, err
 	}
+	rmqUsername := os.Getenv("RMQ_USERNAME")
+	rmqPassword := os.Getenv("RMQ_PASSWORD")
+	rmqVHost := os.Getenv("RMQ_VHOST")
+	rmqTLS, err := strconv.ParseBool(os.Getenv("RMQ_TLS"))
+	if err != nil {
+		return RMQConfig{}, err
+	}
+
+	return RMQConfig{
+		Schema:   rmqSchema,
+		Host:     rmqHost,
+		Port:     rmqPort,
+		Username: rmqUsername,
+		Password: rmqPassword,
+		VHost:    rmqVHost,
+		TLS:      rmqTLS,
+	}, nil
 }
 
-// ========================
-// Log Config
-// ========================
+type DBConfig struct {
+	Schema   string
+	Host     string
+	Port     int
+	Username string
+	Password string
+	Name     string
+	SSLMode  string
+}
+
+func (dbc DBConfig) GetUrl() string {
+	return fmt.Sprintf(
+		"%v://%v:%v@%v:%v/%v@sslmode=%v",
+		dbc.Schema,
+		dbc.Username,
+		dbc.Password,
+		dbc.Host,
+		dbc.Port,
+		dbc.Name,
+		dbc.SSLMode,
+	)
+}
+
+func LoadDBConfig() (DBConfig, error) {
+	dbHost := os.Getenv("DB_HOST")
+	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
+	if err != nil {
+		return DBConfig{}, err
+	}
+	dbUsername := os.Getenv("DB_USERNAME")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
+	dbSSLMode := os.Getenv("DB_SSLMODE")
+
+	return DBConfig{
+		Host:     dbHost,
+		Port:     dbPort,
+		Username: dbUsername,
+		Password: dbPassword,
+		Name:     dbName,
+		SSLMode:  dbSSLMode,
+	}, nil
+}
+
 type LogConfig struct {
 	Level string
-}
-
-func LoadLogConfig() LogConfig {
-	return LogConfig{
-		Level: getEnvString("LOG_LEVEL", "debug"),
-	}
 }
