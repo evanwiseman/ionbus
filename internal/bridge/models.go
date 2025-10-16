@@ -9,6 +9,7 @@ import (
 type Bridge struct {
 	RMQCh      *amqp.Channel
 	MQTTClient mqtt.Client
+	RouteMap   map[Route]map[Route]struct{}
 }
 
 type RMQBridgeOptions struct {
@@ -23,4 +24,16 @@ type MQTTBridgeOptions struct {
 	ContentType routing.ContentType
 	RMQExchange string
 	RMQKey      string
+}
+
+type RouteType string
+
+const (
+	RouteRMQ  = "rmq"
+	RouteMQTT = "mqtt"
+)
+
+type Route struct {
+	Type RouteType
+	Name string
 }

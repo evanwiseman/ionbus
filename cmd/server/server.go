@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/evanwiseman/ionbus/internal/broker"
-	"github.com/evanwiseman/ionbus/internal/server"
+	"github.com/evanwiseman/ionbus/internal/config"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -51,7 +51,7 @@ func run(ctx context.Context) {
 	if err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
-	cfg, err := server.LoadServerConfig()
+	cfg, err := config.LoadServerConfig()
 	if err != nil {
 		log.Fatalf("Failed to get server config: %v\n", err)
 	}

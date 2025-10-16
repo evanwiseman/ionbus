@@ -151,3 +151,71 @@ func LoadDBConfig() (DBConfig, error) {
 type LogConfig struct {
 	Level string
 }
+
+type ClientConfig struct {
+	ID   string
+	MQTT MQTTConfig
+}
+
+func LoadClientConfig() (ClientConfig, error) {
+	id := os.Getenv("CLIENT_ID")
+	mqttConfig, err := LoadMQTTConfig()
+	if err != nil {
+		return ClientConfig{}, err
+	}
+
+	return ClientConfig{
+		ID:   id,
+		MQTT: mqttConfig,
+	}, nil
+}
+
+type GatewayConfig struct {
+	ID   string
+	MQTT MQTTConfig
+	RMQ  RMQConfig
+}
+
+func LoadGatewayConfig() (GatewayConfig, error) {
+	id := os.Getenv("GATEWAY_ID")
+	mqttConfig, err := LoadMQTTConfig()
+	if err != nil {
+		return GatewayConfig{}, err
+	}
+
+	rmqConfig, err := LoadRMQConfig()
+	if err != nil {
+		return GatewayConfig{}, err
+	}
+
+	return GatewayConfig{
+		ID:   id,
+		MQTT: mqttConfig,
+		RMQ:  rmqConfig,
+	}, nil
+}
+
+type ServerConfig struct {
+	ID  string
+	RMQ RMQConfig
+	DB  DBConfig
+}
+
+func LoadServerConfig() (ServerConfig, error) {
+	id := os.Getenv("SERVER_ID")
+	rmqConfig, err := LoadRMQConfig()
+	if err != nil {
+		return ServerConfig{}, err
+	}
+
+	dbConfig, err := LoadDBConfig()
+	if err != nil {
+		return ServerConfig{}, err
+	}
+
+	return ServerConfig{
+		ID:  id,
+		RMQ: rmqConfig,
+		DB:  dbConfig,
+	}, nil
+}
