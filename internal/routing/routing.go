@@ -1,7 +1,10 @@
 package routing
 
 const (
-	CommandsKey = "commands"
+	CommandsPrefix = "commands"
+	GatewaysPrefix = "gateways"
+	DevicesPrefix  = "devices"
+	GetKey         = "get"
 )
 
 const (
