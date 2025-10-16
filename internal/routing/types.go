@@ -56,9 +56,18 @@ const (
 	NackDiscard
 )
 
-type SimpleQueueType int
+type ExchangeType string
 
 const (
-	Durable SimpleQueueType = iota
+	Direct  ExchangeType = "direct"
+	Fanout  ExchangeType = "fanout"
+	Headers ExchangeType = "headers"
+	Topic   ExchangeType = "topic"
+)
+
+type QueueType int
+
+const (
+	Durable QueueType = iota
 	Transient
 )

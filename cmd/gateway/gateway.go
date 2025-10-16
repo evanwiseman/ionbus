@@ -2,17 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/bridge"
 	"github.com/evanwiseman/ionbus/internal/broker"
 	"github.com/evanwiseman/ionbus/internal/config"
-	"github.com/evanwiseman/ionbus/internal/pubsub"
 	"github.com/evanwiseman/ionbus/internal/routing"
 	"github.com/joho/godotenv"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 const (
@@ -60,7 +60,6 @@ func run(ctx context.Context) {
 	// ========================
 	// Start MQTT
 	// ========================
-	log.Println("Connecting to MQTT...")
 	mqttClient, err := broker.StartMQTT(cfg.MQTT, cfg.ID)
 	if err != nil {
 		log.Fatalf("Failed to connect to MQTT: %v\n", err)
@@ -71,7 +70,6 @@ func run(ctx context.Context) {
 	// ========================
 	// Start RabbitMQ
 	// ========================
-	log.Println("Connecting to RabbitMQ...")
 	rmqConn, err := broker.StartRMQ(cfg.RMQ)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
@@ -80,58 +78,11 @@ func run(ctx context.Context) {
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
-	// Test Bridge
+	// Commands
 	// ========================
-	rmqCh, err := rmqConn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open RabbitMQ channel: %v\n", err)
-	}
-	b := bridge.Bridge{
-		RMQCh:      rmqCh,
-		MQTTClient: mqttClient,
-	}
-
-	// 1. Declare RabbitMQ infrastructure first
-	err = rmqCh.ExchangeDeclare("telemetry", "topic", true, false, false, false, nil)
-	if err != nil {
-		log.Fatalf("Failed to create exchange: %v\n", err)
-	}
-	_, err = rmqCh.QueueDeclare("telemetry.inbound", true, false, false, false, nil)
-	if err != nil {
-		log.Fatalf("Failed to declare inbound queue: %v\n", err)
-	}
-	_, err = rmqCh.QueueDeclare("telemetry.outbound", true, false, false, false, nil)
-	if err != nil {
-		log.Fatalf("Failed to declare outbound queue: %v\n", err)
-	}
-	err = rmqCh.QueueBind("telemetry.inbound", "telemetry.#.inbound", "telemetry", false, nil)
-	if err != nil {
-		log.Fatalf("Failed to bind inbound queue: %v\n", err)
-	}
-	err = rmqCh.QueueBind("telemetry.outbound", "telemetry.#.outbound", "telemetry", false, nil)
-	if err != nil {
-		log.Fatalf("Failed to bind outbound queue: %v\n", err)
-	}
-
-	// 2. Create bridge configuration
-	err = b.BidirectionalBridge(
-		ctx,
-		// Inbound (server → gateway → device)
-		pubsub.RMQSubscribeOptions{QueueName: "telemetry.inbound"},
-		pubsub.MQTTPublishOptions{Topic: "device/+/telemetry/inbound"},
-
-		// Outbound (device → gateway → server)
-		pubsub.MQTTSubscribeOptions{Topic: "device/+/telemetry/outbound"},
-		pubsub.RMQPublishOptions{Exchange: "telemetry", Key: "telemetry.outbound"},
-		routing.ContentJSON,
-	)
-	if err != nil {
-		log.Fatalf("Failed to bridge: %v\n", err)
-	}
-
-	// ========================
-	// Subscribe to Topics/Queues
-	// ========================
+	commandsCh := openChannel(rmqConn)
+	declareCommandsExchange(commandsCh)
+	_ = declareAndBindCommandsQueue(commandsCh, cfg.ID)
 
 	// ========================
 	// Confirm gateway is started
@@ -143,4 +94,39 @@ func run(ctx context.Context) {
 	// ========================
 	<-ctx.Done()
 	log.Println("Context cancelled, shutting down gracefully...")
+}
+
+func openChannel(conn *amqp.Connection) *amqp.Channel {
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open channel: %v\n", err)
+	}
+	log.Println("Successfully opened channel for 'commands' on RabbitMQ")
+	return ch
+}
+
+func declareCommandsExchange(ch *amqp.Channel) {
+	err := broker.DeclareCommandExchange(ch)
+	if err != nil {
+		log.Fatalf("Failed to create commands exchange: %v\n", err)
+	}
+	log.Println("Successfully created commands exchange")
+}
+
+func declareAndBindCommandsQueue(ch *amqp.Channel, gatewayID string) amqp.Queue {
+	queueName := fmt.Sprintf("%v.%v", routing.CommandsKey, gatewayID)
+	routingKey := fmt.Sprintf("%v.%v.#", routing.CommandsKey, gatewayID)
+	q, err := broker.DeclareAndBindQueue(
+		ch,
+		routing.ExchangeCommandsTopic,
+		queueName,
+		routing.Transient,
+		routingKey,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("Failed to create/bind commands queue: %v\n", err)
+	}
+	log.Println("Successfully created/binded commands queue:", queueName)
+	return q
 }
