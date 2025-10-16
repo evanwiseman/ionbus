@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"fmt"
+	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/routing"
@@ -17,6 +18,7 @@ func PublishRMQ[T any](
 	val T,
 ) error {
 	// Marshal val to JSON []byte
+	log.Printf("Publishing RMQ message %v...\n", val)
 	payload, err := routing.Marshal(val, contentType)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
@@ -53,7 +55,8 @@ func PublishMQTT[T any](
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	token := client.Publish(opts.Topic, opts.Qos, opts.Retained, payload)
+	log.Printf("Publishing MQTT message %v...\n", val)
+	token := client.Publish(opts.Topic, opts.QoS, opts.Retained, payload)
 
 	// Wait or cancel via context
 	done := make(chan struct{}, 1)

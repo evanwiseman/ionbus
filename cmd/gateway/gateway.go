@@ -7,8 +7,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/evanwiseman/ionbus/internal/bridge"
 	"github.com/evanwiseman/ionbus/internal/broker"
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/pubsub"
+	"github.com/evanwiseman/ionbus/internal/routing"
 	"github.com/joho/godotenv"
 )
 
@@ -69,15 +72,65 @@ func run(ctx context.Context) {
 	// Start RabbitMQ
 	// ========================
 	log.Println("Connecting to RabbitMQ...")
-	rabbitConn, err := broker.StartRMQ(cfg.RMQ)
+	rmqConn, err := broker.StartRMQ(cfg.RMQ)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
-	defer rabbitConn.Close()
+	defer rmqConn.Close()
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
-	// Subscribe to MQTT Topics
+	// Test Bridge
+	// ========================
+	rmqCh, err := rmqConn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open RabbitMQ channel: %v\n", err)
+	}
+	b := bridge.Bridge{
+		RMQCh:      rmqCh,
+		MQTTClient: mqttClient,
+	}
+
+	// 1. Declare RabbitMQ infrastructure first
+	err = rmqCh.ExchangeDeclare("telemetry", "topic", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Failed to create exchange: %v\n", err)
+	}
+	_, err = rmqCh.QueueDeclare("telemetry.inbound", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Failed to declare inbound queue: %v\n", err)
+	}
+	_, err = rmqCh.QueueDeclare("telemetry.outbound", true, false, false, false, nil)
+	if err != nil {
+		log.Fatalf("Failed to declare outbound queue: %v\n", err)
+	}
+	err = rmqCh.QueueBind("telemetry.inbound", "telemetry.#.inbound", "telemetry", false, nil)
+	if err != nil {
+		log.Fatalf("Failed to bind inbound queue: %v\n", err)
+	}
+	err = rmqCh.QueueBind("telemetry.outbound", "telemetry.#.outbound", "telemetry", false, nil)
+	if err != nil {
+		log.Fatalf("Failed to bind outbound queue: %v\n", err)
+	}
+
+	// 2. Create bridge configuration
+	err = b.BidirectionalBridge(
+		ctx,
+		// Inbound (server → gateway → device)
+		pubsub.RMQSubscribeOptions{QueueName: "telemetry.inbound"},
+		pubsub.MQTTPublishOptions{Topic: "device/+/telemetry/inbound"},
+
+		// Outbound (device → gateway → server)
+		pubsub.MQTTSubscribeOptions{Topic: "device/+/telemetry/outbound"},
+		pubsub.RMQPublishOptions{Exchange: "telemetry", Key: "telemetry.outbound"},
+		routing.ContentJSON,
+	)
+	if err != nil {
+		log.Fatalf("Failed to bridge: %v\n", err)
+	}
+
+	// ========================
+	// Subscribe to Topics/Queues
 	// ========================
 
 	// ========================

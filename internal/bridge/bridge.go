@@ -68,7 +68,7 @@ func (b *Bridge) RMQToMQTT(
 	pubOpts pubsub.MQTTPublishOptions,
 	contentType routing.ContentType,
 ) error {
-	return pubsub.SubscribeRMQ(
+	err := pubsub.SubscribeRMQ(
 		ctx,
 		b.RMQCh,
 		subOpts,
@@ -87,6 +87,11 @@ func (b *Bridge) RMQToMQTT(
 			return routing.Ack
 		},
 	)
+	if err == nil {
+		log.Printf("Successfully bridged %v->%v\n", subOpts.QueueName, pubOpts.Topic)
+	}
+
+	return err
 }
 
 // MQTTToRMQ creates a unidirectional bridge that forwards messages from an MQTT topic to a RabbitMQ exchange.
@@ -155,7 +160,7 @@ func (b *Bridge) MQTTToRMQ(
 	pubOpts pubsub.RMQPublishOptions,
 	contentType routing.ContentType,
 ) error {
-	return pubsub.SubscribeMQTT(
+	err := pubsub.SubscribeMQTT(
 		ctx,
 		b.MQTTClient,
 		subOpts,
@@ -174,6 +179,10 @@ func (b *Bridge) MQTTToRMQ(
 			return routing.Ack
 		},
 	)
+	if err == nil {
+		log.Printf("Successfully bridged %v->%v\n", subOpts.Topic, pubOpts.Key)
+	}
+	return err
 }
 
 // BidirectionalBridge sets up TWO separate one-way bridges with distinct paths.
@@ -239,6 +248,6 @@ func (b *Bridge) BidirectionalBridge(
 	case err := <-errChan2:
 		return err
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil
 	}
 }

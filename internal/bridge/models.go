@@ -9,7 +9,6 @@ import (
 type Bridge struct {
 	RMQCh      *amqp.Channel
 	MQTTClient mqtt.Client
-	RouteMap   map[Route]map[Route]struct{}
 }
 
 type RMQBridgeOptions struct {

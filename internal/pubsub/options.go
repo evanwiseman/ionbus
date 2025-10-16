@@ -26,7 +26,7 @@ type RMQSubscribeOptions struct {
 
 type MQTTPublishOptions struct {
 	Topic    string
-	Qos      byte
+	QoS      byte
 	Retained bool
 }
 

@@ -10,6 +10,8 @@ import (
 
 	"github.com/evanwiseman/ionbus/internal/broker"
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/pubsub"
+	"github.com/evanwiseman/ionbus/internal/routing"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -60,11 +62,11 @@ func run(ctx context.Context) {
 	// Start RabbitMQ
 	// ========================
 	log.Println("Connecting to RabbitMQ...")
-	rabbitConn, err := broker.StartRMQ(cfg.RMQ)
+	rmqConn, err := broker.StartRMQ(cfg.RMQ)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
-	defer rabbitConn.Close()
+	defer rmqConn.Close()
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
@@ -77,6 +79,29 @@ func run(ctx context.Context) {
 	}
 	defer db.Close()
 	log.Println("Successfully connected to database")
+
+	// ========================
+	// Test Bridge
+	// ========================
+	rmqCh, err := rmqConn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open RabbitMQ channel: %v\n", err)
+	}
+
+	rmqCh.ExchangeDeclare("telemetry", "topic", true, false, false, false, nil)
+	rmqCh.QueueDeclare("telemetry.outbound", true, false, false, false, nil)
+	rmqCh.QueueBind("telemetry.outbound", "telemetry.#.outbound", "telemetry", false, nil)
+
+	pubsub.SubscribeRMQ(
+		ctx,
+		rmqCh,
+		pubsub.RMQSubscribeOptions{QueueName: "telemetry.outbound"},
+		routing.ContentJSON,
+		func(msg any) routing.AckType {
+			log.Printf("Received telemetry: %s\n", msg)
+			return routing.Ack
+		},
+	)
 
 	// ========================
 	// Wait for cancellation
