@@ -1,9 +1,8 @@
-package broker
+package pubsub
 
 import (
 	"fmt"
 
-	"github.com/evanwiseman/ionbus/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -11,7 +10,7 @@ func DeclareCommandExchange(
 	ch *amqp.Channel,
 ) error {
 	return ch.ExchangeDeclare(
-		routing.ExchangeCommandsTopic,
+		ExchangeCommandsTopic,
 		"topic",
 		true,  // durable
 		false, // auto-delete
@@ -25,7 +24,7 @@ func DeclareDLX(
 	ch *amqp.Channel,
 ) error {
 	return ch.ExchangeDeclare(
-		routing.ExchangeIonbusDlx,
+		ExchangeIonbusDlx,
 		"direct",
 		true,
 		false,
@@ -53,7 +52,7 @@ func DeclareDLQ(
 	}
 
 	// Bind the DLQ to the DLX using the routing key
-	exchangeName := routing.ExchangeIonbusDlx
+	exchangeName := ExchangeIonbusDlx
 	err = ch.QueueBind(queueName, routingKey, exchangeName, false, nil)
 	if err != nil {
 		return amqp.Queue{}, fmt.Errorf(
@@ -69,7 +68,7 @@ func DeclareAndBindQueue(
 	ch *amqp.Channel,
 	exchangeName string,
 	queueName string,
-	queueType routing.QueueType,
+	queueType QueueType,
 	routingKey string,
 	args amqp.Table,
 ) (amqp.Queue, error) {
@@ -77,11 +76,11 @@ func DeclareAndBindQueue(
 	var isAutoDelete bool
 	var isExclusive bool
 	switch queueType {
-	case routing.Durable:
+	case Durable:
 		isDurable = true
 		isAutoDelete = false
 		isExclusive = false
-	case routing.Transient:
+	case Transient:
 		isDurable = false
 		isAutoDelete = true
 		isExclusive = true
@@ -92,7 +91,7 @@ func DeclareAndBindQueue(
 		args = amqp.Table{}
 	}
 	if _, exists := args["x-dead-letter-exchange"]; !exists {
-		args["x-dead-letter-exchange"] = routing.ExchangeIonbusDlx
+		args["x-dead-letter-exchange"] = ExchangeIonbusDlx
 	}
 
 	// Declare a new q

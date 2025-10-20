@@ -1,4 +1,4 @@
-package routing
+package pubsub
 
 const (
 	CommandsPrefix = "commands"

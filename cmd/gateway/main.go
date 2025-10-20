@@ -8,17 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/bridge"
-	"github.com/evanwiseman/ionbus/internal/broker"
-	"github.com/evanwiseman/ionbus/internal/config"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/cmd/gateway/bridge"
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/evanwiseman/ionbus/internal/routing"
 	"github.com/joho/godotenv"
 	amqp "github.com/rabbitmq/amqp091-go"
-)
-
-const (
-	envFile = "docker/gateway/.env" // Change to ".env" for docker deployment
 )
 
 func cleanup() {
@@ -50,11 +45,11 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus gateway...")
 
 	// Load from .env update
-	err := godotenv.Load(envFile)
+	err := godotenv.Load()
 	if err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
-	cfg, err := config.LoadGatewayConfig()
+	cfg, err := LoadGatewayConfig()
 	if err != nil {
 		log.Fatalf("Failed to get gateway config: %v\n", err)
 	}
@@ -62,9 +57,17 @@ func run(ctx context.Context) {
 	// ========================
 	// Start MQTT
 	// ========================
-	mqttClient, err := broker.StartMQTT(cfg.MQTT, cfg.ID)
-	if err != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", err)
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(cfg.MQTT.GetUrl())
+	opts.SetKeepAlive(cfg.MQTT.KeepAlive)
+	opts.SetCleanSession(cfg.MQTT.CleanSession)
+	opts.SetClientID(cfg.ID)
+	opts.SetUsername(cfg.MQTT.Username)
+	opts.SetPassword(cfg.MQTT.Password)
+
+	mqttClient := mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
+		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
 	}
 	defer mqttClient.Disconnect(250)
 	log.Println("Successfully connected to MQTT")
@@ -72,7 +75,7 @@ func run(ctx context.Context) {
 	// ========================
 	// Start RabbitMQ
 	// ========================
-	rmqConn, err := broker.StartRMQ(cfg.RMQ)
+	rmqConn, err := amqp.Dial(cfg.RMQ.GetUrl())
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
 	}
@@ -92,17 +95,17 @@ func run(ctx context.Context) {
 	gatewayQueueName := fmt.Sprintf("%v", cfg.ID) // gateway-id
 	gatewayRoutingKey := fmt.Sprintf(             // commands.gateways.gateway-id
 		"%s.%s.%s",
-		routing.CommandsPrefix,
-		routing.GatewaysPrefix,
+		pubsub.CommandsPrefix,
+		pubsub.GatewaysPrefix,
 		cfg.ID,
 	)
 
 	// Declare and bind the gateway queue
-	_, err = broker.DeclareAndBindQueue(
+	_, err = pubsub.DeclareAndBindQueue(
 		commandsCh,
-		routing.ExchangeCommandsTopic,
+		pubsub.ExchangeCommandsTopic,
 		gatewayQueueName,
-		routing.Transient,
+		pubsub.Transient,
 		gatewayRoutingKey,
 		nil,
 	)
@@ -115,21 +118,21 @@ func run(ctx context.Context) {
 	// Client
 	// ========================
 	// Clients queue name and routing key
-	clientsQueueName := fmt.Sprintf("%s.%s", cfg.ID, routing.ClientsPrefix) // gateway-id.clients
-	devicesRoutingKey := fmt.Sprintf(                                       // commands.gateways.gateway-id.clients.#
+	clientsQueueName := fmt.Sprintf("%s.%s", cfg.ID, pubsub.ClientsPrefix) // gateway-id.clients
+	devicesRoutingKey := fmt.Sprintf(                                      // commands.gateways.gateway-id.clients.#
 		"%s.%s.%s.%s.#",
-		routing.CommandsPrefix,
-		routing.GatewaysPrefix,
+		pubsub.CommandsPrefix,
+		pubsub.GatewaysPrefix,
 		cfg.ID,
-		routing.ClientsPrefix,
+		pubsub.ClientsPrefix,
 	)
 
 	// Declare and bind the clients
-	_, err = broker.DeclareAndBindQueue(
+	_, err = pubsub.DeclareAndBindQueue(
 		commandsCh,
-		routing.ExchangeCommandsTopic,
+		pubsub.ExchangeCommandsTopic,
 		clientsQueueName,
-		routing.Transient,
+		pubsub.Transient,
 		devicesRoutingKey,
 		nil,
 	)
@@ -150,13 +153,13 @@ func run(ctx context.Context) {
 		ctx,
 		pubsub.RMQSubscribeOptions{QueueName: clientsQueueName},
 		pubsub.MQTTPublishOptions{Topic: "clients/"},
-		routing.ContentJSON,
+		models.ContentJSON,
 	)
 	b.MQTTToRMQ(
 		ctx,
 		pubsub.MQTTSubscribeOptions{},
 		pubsub.RMQPublishOptions{},
-		routing.ContentJSON,
+		models.ContentJSON,
 	)
 
 	// ========================

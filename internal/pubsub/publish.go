@@ -6,7 +6,7 @@ import (
 	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/evanwiseman/ionbus/internal/routing"
+	"github.com/evanwiseman/ionbus/internal/models"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -14,12 +14,12 @@ func PublishRMQ[T any](
 	ctx context.Context,
 	ch *amqp.Channel,
 	opts RMQPublishOptions,
-	contentType routing.ContentType,
+	contentType models.ContentType,
 	val T,
 ) error {
 	// Marshal val to JSON []byte
 	log.Printf("Publishing RMQ message %v...\n", val)
-	payload, err := routing.Marshal(val, contentType)
+	payload, err := models.Marshal(val, contentType)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
@@ -47,10 +47,10 @@ func PublishMQTT[T any](
 	ctx context.Context,
 	client mqtt.Client,
 	opts MQTTPublishOptions,
-	contentType routing.ContentType,
+	contentType models.ContentType,
 	val T,
 ) error {
-	payload, err := routing.Marshal(val, contentType)
+	payload, err := models.Marshal(val, contentType)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}

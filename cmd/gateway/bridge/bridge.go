@@ -4,9 +4,16 @@ import (
 	"context"
 	"log"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/evanwiseman/ionbus/internal/routing"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+type Bridge struct {
+	RMQCh      *amqp.Channel
+	MQTTClient mqtt.Client
+}
 
 // RMQToMQTT creates a unidirectional bridge that forwards messages from a RabbitMQ queue to an MQTT topic.
 //
@@ -66,14 +73,14 @@ func (b *Bridge) RMQToMQTT(
 	ctx context.Context,
 	subOpts pubsub.RMQSubscribeOptions,
 	pubOpts pubsub.MQTTPublishOptions,
-	contentType routing.ContentType,
+	contentType models.ContentType,
 ) error {
 	err := pubsub.SubscribeRMQ(
 		ctx,
 		b.RMQCh,
 		subOpts,
 		contentType,
-		func(msg any) routing.AckType {
+		func(msg any) pubsub.AckType {
 			if err := pubsub.PublishMQTT(
 				ctx,
 				b.MQTTClient,
@@ -82,9 +89,9 @@ func (b *Bridge) RMQToMQTT(
 				msg,
 			); err != nil {
 				log.Printf("Bridge RMQ->MQTT publish failed: %v", err)
-				return routing.NackRequeue
+				return pubsub.NackRequeue
 			}
-			return routing.Ack
+			return pubsub.Ack
 		},
 	)
 	if err == nil {
@@ -158,14 +165,14 @@ func (b *Bridge) MQTTToRMQ(
 	ctx context.Context,
 	subOpts pubsub.MQTTSubscribeOptions,
 	pubOpts pubsub.RMQPublishOptions,
-	contentType routing.ContentType,
+	contentType models.ContentType,
 ) error {
 	err := pubsub.SubscribeMQTT(
 		ctx,
 		b.MQTTClient,
 		subOpts,
 		contentType,
-		func(msg any) routing.AckType {
+		func(msg any) pubsub.AckType {
 			if err := pubsub.PublishRMQ(
 				ctx,
 				b.RMQCh,
@@ -174,9 +181,9 @@ func (b *Bridge) MQTTToRMQ(
 				msg,
 			); err != nil {
 				log.Printf("Bridge MQTT->RMQ publish failed: %v", err)
-				return routing.NackRequeue
+				return pubsub.NackRequeue
 			}
-			return routing.Ack
+			return pubsub.Ack
 		},
 	)
 	if err == nil {
@@ -221,7 +228,7 @@ func (b *Bridge) BidirectionalBridge(
 	mqttPubOpts pubsub.MQTTPublishOptions,
 	mqttSubOpts pubsub.MQTTSubscribeOptions,
 	rmqPubOpts pubsub.RMQPublishOptions,
-	contentType routing.ContentType,
+	contentType models.ContentType,
 ) error {
 	// Start RMQ -> MQTT bridge
 	errChan1 := make(chan error, 1)

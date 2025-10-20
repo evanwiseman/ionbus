@@ -7,13 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/broker"
-	"github.com/evanwiseman/ionbus/internal/config"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/joho/godotenv"
-)
-
-const (
-	envFile = "docker/client/.env" // Change to ".env" for docker deployment
 )
 
 func cleanup() {
@@ -45,11 +40,11 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus client...")
 
 	// Load from .env update
-	err := godotenv.Load(envFile)
+	err := godotenv.Load()
 	if err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
-	cfg, err := config.LoadClientConfig()
+	cfg, err := LoadClientConfig()
 	if err != nil {
 		log.Fatalf("Failed to get server config: %v\n", err)
 	}
@@ -57,10 +52,17 @@ func run(ctx context.Context) {
 	// ========================
 	// Start MQTT
 	// ========================
-	log.Println("Connecting to MQTT...")
-	mqttClient, err := broker.StartMQTT(cfg.MQTT, cfg.ID)
-	if err != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", err)
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(cfg.MQTT.GetUrl())
+	opts.SetKeepAlive(cfg.MQTT.KeepAlive)
+	opts.SetCleanSession(cfg.MQTT.CleanSession)
+	opts.SetClientID(cfg.ID)
+	opts.SetUsername(cfg.MQTT.Username)
+	opts.SetPassword(cfg.MQTT.Password)
+
+	mqttClient := mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
+		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
 	}
 	defer mqttClient.Disconnect(250)
 	log.Println("Successfully connected to MQTT")

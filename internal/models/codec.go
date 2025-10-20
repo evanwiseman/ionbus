@@ -1,4 +1,4 @@
-package routing
+package models
 
 import (
 	"bytes"
@@ -47,27 +47,3 @@ func Unmarshal(data []byte, contentType ContentType, v any) error {
 		return fmt.Errorf("unsupported content type: %s", contentType)
 	}
 }
-
-type AckType int
-
-const (
-	Ack AckType = iota
-	NackRequeue
-	NackDiscard
-)
-
-type ExchangeType string
-
-const (
-	Direct  ExchangeType = "direct"
-	Fanout  ExchangeType = "fanout"
-	Headers ExchangeType = "headers"
-	Topic   ExchangeType = "topic"
-)
-
-type QueueType int
-
-const (
-	Durable QueueType = iota
-	Transient
-)
