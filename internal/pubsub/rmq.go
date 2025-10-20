@@ -4,12 +4,43 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+func PublishRMQ[T any](
+	ctx context.Context,
+	ch *amqp.Channel,
+	opts RMQPublishOptions,
+	contentType models.ContentType,
+	val T,
+) error {
+	// Marshal val to JSON []byte
+	log.Printf("Publishing RMQ message %v...\n", val)
+	payload, err := models.Marshal(val, contentType)
+	if err != nil {
+		return fmt.Errorf("failed to marshal content: %w", err)
+	}
+
+	// Publish the message to the exchange
+	err = ch.PublishWithContext(
+		ctx,
+		opts.Exchange,
+		opts.Key,
+		opts.Mandatory,
+		opts.Immediate,
+		amqp.Publishing{
+			ContentType: string(contentType),
+			Body:        payload,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to publish message: %w", err)
+	}
+
+	return nil
+}
 
 func SubscribeRMQ[T any](
 	ctx context.Context,
@@ -69,43 +100,6 @@ func SubscribeRMQ[T any](
 				}
 			}
 		}
-	}()
-
-	return nil
-}
-
-func SubscribeMQTT[T any](
-	ctx context.Context,
-	client mqtt.Client,
-	opts MQTTSubscribeOptions,
-	contentType models.ContentType,
-	handler func(T) AckType, // for consistency with rmq
-) error {
-	token := client.Subscribe(opts.Topic, opts.QoS, func(client mqtt.Client, msg mqtt.Message) {
-		var obj T
-
-		if err := models.Unmarshal(msg.Payload(), contentType, &obj); err != nil {
-			log.Printf("Failed to unmarhsal message: %v\n", err)
-		}
-
-		_ = handler(obj) // Ignore ack type, paho handles it
-	})
-
-	// Wait for subscription acknowledgment with a timeout
-	if !token.WaitTimeout(5 * time.Second) {
-		return fmt.Errorf("timeout waiting for subscription to topic %s", opts.Topic)
-	}
-
-	if err := token.Error(); err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
-	}
-
-	// Run a goroutine to handle context cancellation
-	go func() {
-		<-ctx.Done()
-		log.Printf("Context cancelled, unsubscribing from topic %s", opts.Topic)
-		unsub := client.Unsubscribe(opts.Topic)
-		unsub.WaitTimeout(3 * time.Second)
 	}()
 
 	return nil
