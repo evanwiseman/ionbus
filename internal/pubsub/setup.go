@@ -6,17 +6,17 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func DeclareCommandExchange(
+func DeclareIonbusTopic(
 	ch *amqp.Channel,
 ) error {
 	return ch.ExchangeDeclare(
-		ExchangeCommandsTopic,
+		ExchangeIonbusTopic,
 		"topic",
-		true,  // durable
-		false, // auto-delete
-		false, // internal
-		false, // no-wait
-		nil,   // args
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 }
 

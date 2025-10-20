@@ -4,10 +4,9 @@ const (
 	CommandsPrefix = "commands"
 	GatewaysPrefix = "gateways"
 	ClientsPrefix  = "clients"
-	GetKey         = "get"
 )
 
 const (
-	ExchangeCommandsTopic = "commands_topic"
-	ExchangeIonbusDlx     = "ionbus_dlx"
+	ExchangeIonbusTopic = "ionbus_topic"
+	ExchangeIonbusDlx   = "ionbus_dlx"
 )

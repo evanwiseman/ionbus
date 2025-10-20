@@ -9,8 +9,6 @@ import (
 	"syscall"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/evanwiseman/ionbus/cmd/gateway/bridge"
-	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	"github.com/joho/godotenv"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -45,7 +43,7 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus gateway...")
 
 	// Load from .env update
-	err := godotenv.Load()
+	err := godotenv.Load("./cmd/gateway/.env")
 	if err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
@@ -83,84 +81,35 @@ func run(ctx context.Context) {
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
-	// Commands
+	// Setup RabbitMQ
 	// ========================
-	// Open the channel
-	commandsCh := openChannel(rmqConn)
+	topicCh, err := rmqConn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
+	}
+	defer topicCh.Close()
 
-	// ========================
-	// Gateways
-	// ========================
-	// Gateway queue name and routing key
-	gatewayQueueName := fmt.Sprintf("%v", cfg.ID) // gateway-id
-	gatewayRoutingKey := fmt.Sprintf(             // commands.gateways.gateway-id
-		"%s.%s.%s",
-		pubsub.CommandsPrefix,
-		pubsub.GatewaysPrefix,
-		cfg.ID,
-	)
+	if err := pubsub.DeclareIonbusTopic(topicCh); err != nil {
+		log.Fatalf("Failed to create/open %s: %v", pubsub.ExchangeIonbusTopic, err)
+	}
 
-	// Declare and bind the gateway queue
+	gatewayCh, err := rmqConn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
+	}
+	defer gatewayCh.Close()
+
 	_, err = pubsub.DeclareAndBindQueue(
-		commandsCh,
-		pubsub.ExchangeCommandsTopic,
-		gatewayQueueName,
-		pubsub.Transient,
-		gatewayRoutingKey,
+		gatewayCh,
+		pubsub.ExchangeIonbusTopic,
+		cfg.ID,
+		pubsub.Durable,
+		fmt.Sprintf("gateways.%s.#", cfg.ID),
 		nil,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create/bind gateway queue: %v\n", err)
+		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
 	}
-	log.Println("Successfully created/binded gateway queue:", gatewayQueueName)
-
-	// ========================
-	// Client
-	// ========================
-	// Clients queue name and routing key
-	clientsQueueName := fmt.Sprintf("%s.%s", cfg.ID, pubsub.ClientsPrefix) // gateway-id.clients
-	devicesRoutingKey := fmt.Sprintf(                                      // commands.gateways.gateway-id.clients.#
-		"%s.%s.%s.%s.#",
-		pubsub.CommandsPrefix,
-		pubsub.GatewaysPrefix,
-		cfg.ID,
-		pubsub.ClientsPrefix,
-	)
-
-	// Declare and bind the clients
-	_, err = pubsub.DeclareAndBindQueue(
-		commandsCh,
-		pubsub.ExchangeCommandsTopic,
-		clientsQueueName,
-		pubsub.Transient,
-		devicesRoutingKey,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("Failed to create/bind clients GET queue: %v\n", err)
-	}
-	log.Println("Successfully created/binded clients GET queue:", clientsQueueName)
-
-	// ========================
-	// Bridge Commands to MQTT
-	// ========================
-	b := bridge.Bridge{
-		RMQCh:      commandsCh,
-		MQTTClient: mqttClient,
-	}
-	// Bind Devices GET to MQTT
-	b.RMQToMQTT(
-		ctx,
-		pubsub.RMQSubscribeOptions{QueueName: clientsQueueName},
-		pubsub.MQTTPublishOptions{Topic: "clients/"},
-		models.ContentJSON,
-	)
-	b.MQTTToRMQ(
-		ctx,
-		pubsub.MQTTSubscribeOptions{},
-		pubsub.RMQPublishOptions{},
-		models.ContentJSON,
-	)
 
 	// ========================
 	// Confirm gateway is started
@@ -172,13 +121,4 @@ func run(ctx context.Context) {
 	// ========================
 	<-ctx.Done()
 	log.Println("Context cancelled, shutting down gracefully...")
-}
-
-func openChannel(conn *amqp.Connection) *amqp.Channel {
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open channel: %v\n", err)
-	}
-	log.Println("Successfully opened channel for 'commands' on RabbitMQ")
-	return ch
 }

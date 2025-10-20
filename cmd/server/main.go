@@ -43,7 +43,7 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus server...")
 
 	// Load from .env update
-	err := godotenv.Load()
+	err := godotenv.Load("./cmd/server/.env")
 	if err != nil {
 		log.Fatalf("Error loading .env file: %v", err)
 	}
@@ -63,16 +63,16 @@ func run(ctx context.Context) {
 	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
-	// Setup RMQ Commands
+	// Setup RabbitMQ
 	// ========================
-	commandCh, err := rmqConn.Channel()
+	topicCh, err := rmqConn.Channel()
 	if err != nil {
-		log.Fatalf("Failed to open RabbitMQ channel: %v\n", err)
+		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
 	}
+	defer topicCh.Close()
 
-	err = pubsub.DeclareCommandExchange(commandCh)
-	if err != nil {
-		log.Fatalf("Failed to create RabbitMQ command exchange: %v\n", err)
+	if err := pubsub.DeclareIonbusTopic(topicCh); err != nil {
+		log.Fatalf("Failed to create/open %s: %v", pubsub.ExchangeIonbusTopic, err)
 	}
 
 	// ========================
