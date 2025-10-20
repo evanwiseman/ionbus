@@ -9,8 +9,6 @@ import (
 
 	"github.com/evanwiseman/ionbus/internal/broker"
 	"github.com/evanwiseman/ionbus/internal/config"
-	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/evanwiseman/ionbus/internal/routing"
 	"github.com/joho/godotenv"
 )
 
@@ -66,20 +64,6 @@ func run(ctx context.Context) {
 	}
 	defer mqttClient.Disconnect(250)
 	log.Println("Successfully connected to MQTT")
-
-	go func() {
-		pubsub.PublishMQTT(
-			ctx,
-			mqttClient,
-			pubsub.MQTTPublishOptions{
-				Topic:    "device/test/telemetry/outbound",
-				QoS:      1,
-				Retained: false,
-			},
-			routing.ContentJSON,
-			map[string]interface{}{"message": "this is a test"},
-		)
-	}()
 
 	// ========================
 	// Wait for cancellation

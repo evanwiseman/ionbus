@@ -85,21 +85,13 @@ func run(ctx context.Context) {
 	// Open the channel
 	commandsCh := openChannel(rmqConn)
 
-	// Declare the exchange
-	err = broker.DeclareCommandExchange(commandsCh)
-	if err != nil {
-		log.Fatalf("Failed to create commands exchange: %v\n", err)
-	}
-	log.Println("Successfully created commands exchange")
-	_ = declareAndBindCommandsQueue(commandsCh, cfg.ID)
-
 	// ========================
 	// Gateways
 	// ========================
 	// Gateway queue name and routing key
-	gatewayQueueName := fmt.Sprintf("%v", cfg.ID)
-	gatewayRoutingKey := fmt.Sprintf(
-		"%s.%s.%s.#",
+	gatewayQueueName := fmt.Sprintf("%v", cfg.ID) // gateway-id
+	gatewayRoutingKey := fmt.Sprintf(             // commands.gateways.gateway-id
+		"%s.%s.%s",
 		routing.CommandsPrefix,
 		routing.GatewaysPrefix,
 		cfg.ID,
@@ -117,35 +109,34 @@ func run(ctx context.Context) {
 	if err != nil {
 		log.Fatalf("Failed to create/bind gateway queue: %v\n", err)
 	}
-	log.Println("Successfully created/binded gateway queue:", routing.GatewaysPrefix)
+	log.Println("Successfully created/binded gateway queue:", gatewayQueueName)
 
 	// ========================
-	// Devices
+	// Client
 	// ========================
-	// Devices GET queue name and routing key
-	devicesGetQueueName := fmt.Sprintf("%s.%s.*.%s", cfg.ID, routing.DevicesPrefix, routing.GetKey)
-	devicesGetRoutingKey := fmt.Sprintf(
-		"%s.%s.%s.%s.*.%s",
+	// Clients queue name and routing key
+	clientsQueueName := fmt.Sprintf("%s.%s", cfg.ID, routing.ClientsPrefix) // gateway-id.clients
+	devicesRoutingKey := fmt.Sprintf(                                       // commands.gateways.gateway-id.clients.#
+		"%s.%s.%s.%s.#",
 		routing.CommandsPrefix,
 		routing.GatewaysPrefix,
 		cfg.ID,
-		routing.DevicesPrefix,
-		routing.GetKey,
+		routing.ClientsPrefix,
 	)
 
-	// Declare and bind the devices GET key
+	// Declare and bind the clients
 	_, err = broker.DeclareAndBindQueue(
 		commandsCh,
 		routing.ExchangeCommandsTopic,
-		devicesGetQueueName,
+		clientsQueueName,
 		routing.Transient,
-		devicesGetRoutingKey,
+		devicesRoutingKey,
 		nil,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create/bind devices GET queue: %v\n", err)
+		log.Fatalf("Failed to create/bind clients GET queue: %v\n", err)
 	}
-	log.Println("Successfully created/binded devices GET queue:", routing.GatewaysPrefix)
+	log.Println("Successfully created/binded clients GET queue:", clientsQueueName)
 
 	// ========================
 	// Bridge Commands to MQTT
@@ -157,8 +148,8 @@ func run(ctx context.Context) {
 	// Bind Devices GET to MQTT
 	b.RMQToMQTT(
 		ctx,
-		pubsub.RMQSubscribeOptions{QueueName: devicesGetQueueName},
-		pubsub.MQTTPublishOptions{Topic: "devices/+/get"},
+		pubsub.RMQSubscribeOptions{QueueName: clientsQueueName},
+		pubsub.MQTTPublishOptions{Topic: "clients/"},
 		routing.ContentJSON,
 	)
 	b.MQTTToRMQ(
@@ -187,21 +178,4 @@ func openChannel(conn *amqp.Connection) *amqp.Channel {
 	}
 	log.Println("Successfully opened channel for 'commands' on RabbitMQ")
 	return ch
-}
-func declareAndBindCommandsQueue(ch *amqp.Channel, gatewayID string) amqp.Queue {
-	queueName := fmt.Sprintf("%v.%v", routing.CommandsPrefix, gatewayID)
-	routingKey := fmt.Sprintf("%v.%v.#", routing.CommandsPrefix, gatewayID)
-	q, err := broker.DeclareAndBindQueue(
-		ch,
-		routing.ExchangeCommandsTopic,
-		queueName,
-		routing.Transient,
-		routingKey,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("Failed to create/bind commands queue: %v\n", err)
-	}
-	log.Println("Successfully created/binded commands queue:", queueName)
-	return q
 }

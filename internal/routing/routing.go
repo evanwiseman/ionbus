@@ -3,7 +3,7 @@ package routing
 const (
 	CommandsPrefix = "commands"
 	GatewaysPrefix = "gateways"
-	DevicesPrefix  = "devices"
+	ClientsPrefix  = "clients"
 	GetKey         = "get"
 )
 

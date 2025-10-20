@@ -32,5 +32,5 @@ type MQTTPublishOptions struct {
 
 type MQTTSubscribeOptions struct {
 	Topic string
-	Qos   byte
+	QoS   byte
 }

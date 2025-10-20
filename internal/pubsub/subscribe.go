@@ -81,7 +81,7 @@ func SubscribeMQTT[T any](
 	contentType routing.ContentType,
 	handler func(T) routing.AckType, // for consistency with rmq
 ) error {
-	token := client.Subscribe(opts.Topic, opts.Qos, func(client mqtt.Client, msg mqtt.Message) {
+	token := client.Subscribe(opts.Topic, opts.QoS, func(client mqtt.Client, msg mqtt.Message) {
 		var obj T
 
 		if err := routing.Unmarshal(msg.Payload(), contentType, &obj); err != nil {

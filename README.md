@@ -1,18 +1,33 @@
 # IonBus
 
-**IonBus** is a high-performance, lightweight IoT telemetry system designed to move data from distributed devices to backend services with speed and reliability.  
+IonBus bridges the gap between **IoT devices** and **data infrastructure**. **IonBus** is a high-performance, lightweight IoT telemetry system designed to move data from distributed devices to backend services with speed and reliability.  
 Built with **Go**, **MQTT**, **RabbitMQ**, and **PostgreSQL**, IonBus provides a flexible foundation for real-time sensor data ingestion, processing, and persistence.
 
-## Overview
-
-IonBus bridges the gap between **IoT devices** and **data infrastructure**.  
-It enables devices — such as Raspberry Pis, embedded sensors, or industrial controllers — to securely publish telemetry data over MQTT, while backend services such as RabbitMQ handle aggregation, alerting, and long-term storage.
+## 💡 Motivation
+Pub/Sub architecture is fantastic at sending message(s) to many device(s) at once, yet this requires much technical knowhow and requires knowing which topics to subscribe to. The idea behind IonBus is:
+-  Topics are adaptively configured from the server and sent downstream onto clients
+-  Each topic can create a queue directly to RabbitMQ reducing latency and queue size
+-  Data can be stored locally, publicly, or on a cloud provider for data persistence
 
 This system emphasizes:
 - **High throughput** with minimal overhead  
 - **Reliable message delivery** and retry handling  
 - **Extensible architecture** for analytics or monitoring
-- **Developer-friendly design** for rapid iteration and testing  
+- **Developer-friendly design** for rapid iteration and testing
+
+## 🚀 Quick Start
+TODO
+
+## 📖 Usage
+TODO
+
+## 🤝 Contributing
+
+### Clone the repo
+```bash
+git clone https://github.com/evanwiseman/ionbus@latest
+cd ionbus
+```
 
 ### Architecture Components
 
