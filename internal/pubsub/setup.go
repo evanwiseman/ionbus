@@ -20,6 +20,34 @@ func DeclareIonbusTopic(
 	)
 }
 
+func DeclareIonbusDirect(
+	ch *amqp.Channel,
+) error {
+	return ch.ExchangeDeclare(
+		ExchangeIonbusDirect,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+}
+
+func DeclareIonbusBroadcast(
+	ch *amqp.Channel,
+) error {
+	return ch.ExchangeDeclare(
+		ExchangeIonbusBroadcast,
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+}
+
 func DeclareDLX(
 	ch *amqp.Channel,
 ) error {

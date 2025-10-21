@@ -1,15 +1,20 @@
 package pubsub
 
 const (
-	CommandsPrefix  = "commands"
-	TelemetryPrefix = "telemetry"
-	GatewaysPrefix  = "gateways"
-	ClientsPrefix   = "clients"
+	ClientsPrefix      = "clients"
+	CommandsPrefix     = "commands"
+	GatewaysPrefix     = "gateways"
+	ServerPrefix       = "server"
+	RegistrationPrefix = "registration"
+	RegisterPrefix     = "register"
+	TelemetryPrefix    = "telemetry"
 )
 
 const (
-	ExchangeIonbusTopic = "ionbus_topic"
-	ExchangeIonbusDlx   = "ionbus_dlx"
+	ExchangeIonbusTopic     = "ionbus_topic"
+	ExchangeIonbusDirect    = "ionbus_direct"
+	ExchangeIonbusBroadcast = "ionbus_broadcast"
+	ExchangeIonbusDlx       = "ionbus_dlx"
 )
 
 const (

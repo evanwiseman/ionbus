@@ -3,7 +3,6 @@ package pubsub
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -17,7 +16,6 @@ func PublishRMQ[T any](
 	val T,
 ) error {
 	// Marshal val to JSON []byte
-	log.Printf("Publishing RMQ message %v...\n", val)
 	payload, err := models.Marshal(val, contentType)
 	if err != nil {
 		return fmt.Errorf("failed to marshal content: %w", err)
@@ -72,18 +70,15 @@ func SubscribeRMQ[T any](
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("Context cancelled, stopping consumer")
 				return
 			case msg, ok := <-msgs:
 				if !ok {
-					log.Println("Channel closed, consumer stopping")
 					return
 				}
 
 				// Unmarshal message
 				var obj T
 				if err := models.Unmarshal(msg.Body, contentType, &obj); err != nil {
-					log.Printf("Failed to unmarshal message: %v\n", err)
 					msg.Nack(false, false)
 					continue
 				}

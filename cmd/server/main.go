@@ -2,16 +2,13 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/evanwiseman/ionbus/internal/pubsub"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
-	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func cleanup() {
@@ -43,51 +40,28 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus server...")
 
 	// Load from .env update
-	err := godotenv.Load("./cmd/server/.env")
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+	if err := godotenv.Load("./cmd/server/.env"); err != nil {
+		log.Fatalf("Failed to load .env: %v", err)
 	}
 	cfg, err := LoadServerConfig()
 	if err != nil {
-		log.Fatalf("Failed to get server config: %v\n", err)
+		log.Fatalf("Failed to load server config: %v", err)
 	}
 
-	// ========================
-	// Start RabbitMQ
-	// ========================
-	rmqConn, err := amqp.Dial(cfg.RMQ.GetUrl())
+	// Create a new server
+	server, err := NewServer(ctx, cfg)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
+		log.Fatalf("Failed to create new server: %v", err)
 	}
-	defer rmqConn.Close()
-	log.Println("Sucessfully connected to RabbitMQ")
+	defer server.Close()
 
-	// ========================
-	// Setup RabbitMQ
-	// ========================
-	topicCh, err := rmqConn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
+	// Start the server
+	if err := server.Start(); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
 	}
-	defer topicCh.Close()
+	log.Println("Successfully started ionbus server")
 
-	if err := pubsub.DeclareIonbusTopic(topicCh); err != nil {
-		log.Fatalf("Failed to create/open %s: %v", pubsub.ExchangeIonbusTopic, err)
-	}
-
-	// ========================
-	// Open Postgres Database
-	// ========================
-	db, err := sql.Open("postgres", cfg.DB.GetUrl())
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v\n", err)
-	}
-	defer db.Close()
-	log.Println("Successfully connected to database")
-
-	// ========================
 	// Wait for cancellation
-	// ========================
 	<-ctx.Done()
 	log.Println("Context cancelled, shutting down gracefully...")
 }
