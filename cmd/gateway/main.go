@@ -14,6 +14,13 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type Gateway struct {
+	Ctx        context.Context
+	Cfg        *GatewayConfig
+	MQTTClient mqtt.Client
+	RMQConn    *amqp.Connection
+}
+
 func cleanup() {
 	log.Print("Stopping ionbus gateway... ")
 }
@@ -43,87 +50,26 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus gateway...")
 
 	// Load env
-	cfg := LoadGatewayEnv()
+	cfg := mustLoadGatewayEnv()
 
-	// Start MQTT
-	mqttClient := ConnectMQTT(cfg)
+	mqttClient := mustConnectMQTT(cfg)
+	rmqConn := mustConnectRMQ(cfg)
+	gateway := &Gateway{
+		Ctx:        ctx,
+		Cfg:        cfg,
+		MQTTClient: mqttClient,
+		RMQConn:    rmqConn,
+	}
+
 	defer mqttClient.Disconnect(250)
-
-	// Start RMQ
-	rmqConn := ConnectRMQ(cfg)
 	defer rmqConn.Close()
 
-	// ========================
-	// Setup RabbitMQ
-	// ========================
-	// Topic Exchange
-	topicCh, err := rmqConn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
-	}
-	defer topicCh.Close()
+	gateway.setupMQTT()
+	gateway.setupRabbitMQ()
 
-	if err := pubsub.DeclareIonbusTopic(topicCh); err != nil {
-		log.Fatalf("Failed to create/open %s: %v", pubsub.ExchangeIonbusTopic, err)
-	}
-
-	// Open channel for commands
-	commandsCh := OpenChannel(rmqConn)
+	commandsCh, _ := gateway.setupCommandsQueue()
 	defer commandsCh.Close()
 
-	// Declare and Bind commands
-	commandsExchange := pubsub.ExchangeIonbusTopic
-	commandsQueueName := pubsub.CommandsPrefix
-	commandsQueueType := pubsub.Durable
-	commandsRoutingKey := fmt.Sprintf("%s.%s.%s", pubsub.CommandsPrefix, pubsub.GatewaysPrefix, cfg.ID)
-	_, err = pubsub.DeclareAndBindQueue(
-		commandsCh,
-		commandsExchange,
-		commandsQueueName,
-		commandsQueueType,
-		commandsRoutingKey,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
-	}
-
-	// Open channel for gateway
-	gatewayCh := OpenChannel(rmqConn)
-	defer gatewayCh.Close()
-
-	// Bind to gateway-id.#
-	gatewayQueueName := cfg.ID
-	gatewayRoutingKey := fmt.Sprintf("%s.#", cfg.ID)
-	_, err = pubsub.DeclareAndBindQueue(
-		gatewayCh,
-		pubsub.ExchangeIonbusTopic,
-		cfg.ID,
-		pubsub.Durable,
-		gatewayRoutingKey,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
-	}
-
-	// Bind to gateway-id.clients.#
-	clientsRoutingKey := fmt.Sprintf("%s.%s.#", gatewayQueueName, pubsub.ClientsPrefix)
-	_, err = pubsub.DeclareAndBindQueue(
-		gatewayCh,
-		pubsub.ExchangeIonbusTopic,
-		gatewayQueueName,
-		pubsub.Durable,
-		clientsRoutingKey,
-		nil,
-	)
-	if err != nil {
-		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
-	}
-
-	// ========================
-	// Confirm gateway is started
-	// ========================
 	log.Println("Successfully started ionbus gateway")
 
 	// ========================
@@ -133,20 +79,25 @@ func run(ctx context.Context) {
 	log.Println("Context cancelled, shutting down gracefully...")
 }
 
-// Grabs the Gateway .env, loads it, and returns the Gateway Config ptr
-func LoadGatewayEnv() *GatewayConfig {
-	if err := godotenv.Load("./cmd/gateway/.env"); err != nil {
-		log.Fatalf("Error loading .env: %v", err)
-	}
-	cfg, err := LoadGatewayConfig()
+// Checks if an error occurs, if so fatals with message "Failed to $msg: $err"
+func must(err error, msg string) {
 	if err != nil {
-		log.Fatalf("Failed to load gateway config: %v", err)
+		log.Fatalf("Failed to %s: %v", msg, err)
 	}
+}
+
+// Grabs the Gateway .env, loads it, and returns the Gateway Config ptr
+func mustLoadGatewayEnv() *GatewayConfig {
+	must(godotenv.Load("./cmd/gateway/.env"), "load .env")
+
+	cfg, err := LoadGatewayConfig()
+	must(err, "load gateway config")
+
 	return cfg
 }
 
 // Connects to the MQTT broker using the Gateway Config's Parameters
-func ConnectMQTT(cfg *GatewayConfig) mqtt.Client {
+func mustConnectMQTT(cfg *GatewayConfig) mqtt.Client {
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.GetUrl()).
 		SetKeepAlive(cfg.MQTT.KeepAlive).
@@ -157,28 +108,60 @@ func ConnectMQTT(cfg *GatewayConfig) mqtt.Client {
 
 	client := mqtt.NewClient(opts)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
+		log.Fatalf("Failed to connect to MQTT: %v", token.Error())
 	}
-	log.Println("Successfully connected to MQTT")
 	return client
 }
 
 // Connects to RabbitMQ using the Gateway Config's Parameters
-func ConnectRMQ(cfg *GatewayConfig) *amqp.Connection {
+func mustConnectRMQ(cfg *GatewayConfig) *amqp.Connection {
 	conn, err := amqp.Dial(cfg.RMQ.GetUrl())
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
-	}
-	log.Println("Sucessfully connected to RabbitMQ")
+	must(err, "connect to RabbitMQ")
 
 	return conn
 }
 
 // Opens a channel on RabbitMQ, returns the channel
-func OpenChannel(conn *amqp.Connection) *amqp.Channel {
+func mustOpenChannel(conn *amqp.Connection) *amqp.Channel {
 	ch, err := conn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open RabbitMQ channel: %v", err)
-	}
+	must(err, "open RabbitMQ channel")
+
 	return ch
+}
+
+func (g *Gateway) setupMQTT() {
+
+}
+
+// Setup RabbitMQ topic exchange and dead letter exchange
+func (g *Gateway) setupRabbitMQ() {
+	ch := mustOpenChannel(g.RMQConn)
+	defer ch.Close()
+	must(pubsub.DeclareIonbusTopic(ch), "declare ionbus topic exchange")
+
+	must(pubsub.DeclareDLX(ch), "declare ionbus dead letter exchange")
+	must(pubsub.DeclareDLQ(ch), "declare ionbus dead letter queue")
+}
+
+// Open a new channel, then declare and bind the commands queue to it
+//
+// # Queue name = gateway-id.commands
+//
+// # Routing key = gateways.gateway-id.commands.#
+func (g *Gateway) setupCommandsQueue() (*amqp.Channel, amqp.Queue) {
+	ch := mustOpenChannel(g.RMQConn)
+
+	name := fmt.Sprintf("%s.%s", g.Cfg.ID, pubsub.CommandsPrefix)
+	key := fmt.Sprintf("%s.%s.%s.#", pubsub.GatewaysPrefix, g.Cfg.ID, pubsub.CommandsPrefix)
+
+	q, err := pubsub.DeclareAndBindQueue(
+		ch,
+		pubsub.ExchangeIonbusTopic,
+		name,
+		pubsub.Durable,
+		key,
+	)
+	must(err, "declare command queue")
+
+	return ch, q
 }

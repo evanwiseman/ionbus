@@ -10,3 +10,7 @@ const (
 	ExchangeIonbusTopic = "ionbus_topic"
 	ExchangeIonbusDlx   = "ionbus_dlx"
 )
+
+const (
+	QueueIonbusDlq = "ionbus_dlq"
+)

@@ -36,11 +36,9 @@ func DeclareDLX(
 
 func DeclareDLQ(
 	ch *amqp.Channel,
-	queueName string,
-	routingKey string,
-) (amqp.Queue, error) {
-	q, err := ch.QueueDeclare(
-		queueName,
+) error {
+	_, err := ch.QueueDeclare(
+		QueueIonbusDlq,
 		true,  // durable
 		false, // auto-delete
 		false, // exclusive
@@ -48,29 +46,39 @@ func DeclareDLQ(
 		nil,
 	)
 	if err != nil {
-		return amqp.Queue{}, fmt.Errorf("unable to declare %v: %w", queueName, err)
+		return fmt.Errorf("unable to declare %v: %w", QueueIonbusDlq, err)
 	}
 
 	// Bind the DLQ to the DLX using the routing key
-	exchangeName := ExchangeIonbusDlx
-	err = ch.QueueBind(queueName, routingKey, exchangeName, false, nil)
+	err = ch.QueueBind(QueueIonbusDlq, "#", ExchangeIonbusDlx, false, nil)
 	if err != nil {
-		return amqp.Queue{}, fmt.Errorf(
+		return fmt.Errorf(
 			"unable to bind queue %v with key %v to %v: %w",
-			queueName, routingKey, exchangeName, err,
+			QueueIonbusDlq, "#", ExchangeIonbusDlx, err,
 		)
 	}
 
-	return q, nil
+	return nil
 }
 
+// Declares and binds a queue to the channel on the exchange.
+// The queue name doesn't have to be unique, this method just
+// ensures that the queue is declared before binding.
+//
+// queueType is specified as durable or transiet, if durable
+// flags durable=true, autoDelete=false, exclusive=false,
+// if transient flags durable=false, autodelete=true, exclusive=true
+//
+// # Routing key should make sense and follow a hierarchical structure
+//
+// Dead letter exchange is set by default to the ionbus_dlx bound to ionbus_dlq.
+// Potential error on fail if dlx not setup.
 func DeclareAndBindQueue(
 	ch *amqp.Channel,
-	exchangeName string,
-	queueName string,
+	exchange string,
+	name string,
 	queueType QueueType,
-	routingKey string,
-	args amqp.Table,
+	key string,
 ) (amqp.Queue, error) {
 	var isDurable bool
 	var isAutoDelete bool
@@ -87,16 +95,13 @@ func DeclareAndBindQueue(
 	}
 
 	// Ensure DLX is set if not already provided
-	if args == nil {
-		args = amqp.Table{}
-	}
-	if _, exists := args["x-dead-letter-exchange"]; !exists {
-		args["x-dead-letter-exchange"] = ExchangeIonbusDlx
+	args := amqp.Table{
+		"x-dead-letter-exchange": ExchangeIonbusDlx,
 	}
 
 	// Declare a new q
 	q, err := ch.QueueDeclare(
-		queueName,
+		name,
 		isDurable,
 		isAutoDelete,
 		isExclusive,
@@ -104,15 +109,15 @@ func DeclareAndBindQueue(
 		args,
 	)
 	if err != nil {
-		return amqp.Queue{}, fmt.Errorf("unable to declare %v: %w", queueName, err)
+		return amqp.Queue{}, fmt.Errorf("unable to declare %v: %w", name, err)
 	}
 
 	// Bind the queue to the exchange
-	err = ch.QueueBind(queueName, routingKey, exchangeName, false, nil)
+	err = ch.QueueBind(name, key, exchange, false, nil)
 	if err != nil {
 		return amqp.Queue{}, fmt.Errorf(
 			"unable to bind queue %v with key %v to %v: %w",
-			queueName, routingKey, exchangeName, err,
+			name, key, exchange, err,
 		)
 	}
 
