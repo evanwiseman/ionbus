@@ -70,6 +70,9 @@ func run(ctx context.Context) {
 	commandsCh, _ := gateway.setupCommandsQueue()
 	defer commandsCh.Close()
 
+	telemetryCh, _ := gateway.setupTelemetryQueue()
+	defer telemetryCh.Close()
+
 	log.Println("Successfully started ionbus gateway")
 
 	// ========================
@@ -162,6 +165,24 @@ func (g *Gateway) setupCommandsQueue() (*amqp.Channel, amqp.Queue) {
 		key,
 	)
 	must(err, "declare command queue")
+
+	return ch, q
+}
+
+func (g *Gateway) setupTelemetryQueue() (*amqp.Channel, amqp.Queue) {
+	ch := mustOpenChannel(g.RMQConn)
+
+	name := fmt.Sprintf("%s.%s", g.Cfg.ID, pubsub.TelemetryPrefix)
+	key := fmt.Sprintf("%s.%s.%s.#", pubsub.GatewaysPrefix, g.Cfg.ID, pubsub.TelemetryPrefix)
+
+	q, err := pubsub.DeclareAndBindQueue(
+		ch,
+		pubsub.ExchangeIonbusTopic,
+		name,
+		pubsub.Durable,
+		key,
+	)
+	must(err, "declare telemetry queue")
 
 	return ch, q
 }

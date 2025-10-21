@@ -1,9 +1,10 @@
 package pubsub
 
 const (
-	CommandsPrefix = "commands"
-	GatewaysPrefix = "gateways"
-	ClientsPrefix  = "clients"
+	CommandsPrefix  = "commands"
+	TelemetryPrefix = "telemetry"
+	GatewaysPrefix  = "gateways"
+	ClientsPrefix   = "clients"
 )
 
 const (
