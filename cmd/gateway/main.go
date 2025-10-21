@@ -42,47 +42,21 @@ func main() {
 func run(ctx context.Context) {
 	log.Println("Starting ionbus gateway...")
 
-	// Load from .env update
-	err := godotenv.Load("./cmd/gateway/.env")
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
-	}
-	cfg, err := LoadGatewayConfig()
-	if err != nil {
-		log.Fatalf("Failed to get gateway config: %v\n", err)
-	}
+	// Load env
+	cfg := LoadGatewayEnv()
 
-	// ========================
 	// Start MQTT
-	// ========================
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(cfg.MQTT.GetUrl())
-	opts.SetKeepAlive(cfg.MQTT.KeepAlive)
-	opts.SetCleanSession(cfg.MQTT.CleanSession)
-	opts.SetClientID(cfg.ID)
-	opts.SetUsername(cfg.MQTT.Username)
-	opts.SetPassword(cfg.MQTT.Password)
-
-	mqttClient := mqtt.NewClient(opts)
-	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
-	}
+	mqttClient := ConnectMQTT(cfg)
 	defer mqttClient.Disconnect(250)
-	log.Println("Successfully connected to MQTT")
 
-	// ========================
-	// Start RabbitMQ
-	// ========================
-	rmqConn, err := amqp.Dial(cfg.RMQ.GetUrl())
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
-	}
+	// Start RMQ
+	rmqConn := ConnectRMQ(cfg)
 	defer rmqConn.Close()
-	log.Println("Sucessfully connected to RabbitMQ")
 
 	// ========================
 	// Setup RabbitMQ
 	// ========================
+	// Topic Exchange
 	topicCh, err := rmqConn.Channel()
 	if err != nil {
 		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
@@ -93,18 +67,54 @@ func run(ctx context.Context) {
 		log.Fatalf("Failed to create/open %s: %v", pubsub.ExchangeIonbusTopic, err)
 	}
 
-	gatewayCh, err := rmqConn.Channel()
+	// Open channel for commands
+	commandsCh := OpenChannel(rmqConn)
+	defer commandsCh.Close()
+
+	// Declare and Bind commands
+	commandsExchange := pubsub.ExchangeIonbusTopic
+	commandsQueueName := pubsub.CommandsPrefix
+	commandsQueueType := pubsub.Durable
+	commandsRoutingKey := fmt.Sprintf("%s.%s.%s", pubsub.CommandsPrefix, pubsub.GatewaysPrefix, cfg.ID)
+	_, err = pubsub.DeclareAndBindQueue(
+		commandsCh,
+		commandsExchange,
+		commandsQueueName,
+		commandsQueueType,
+		commandsRoutingKey,
+		nil,
+	)
 	if err != nil {
-		log.Fatalf("Failed to open channel on RabbitMQ: %v", err)
+		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
 	}
+
+	// Open channel for gateway
+	gatewayCh := OpenChannel(rmqConn)
 	defer gatewayCh.Close()
 
+	// Bind to gateway-id.#
+	gatewayQueueName := cfg.ID
+	gatewayRoutingKey := fmt.Sprintf("%s.#", cfg.ID)
 	_, err = pubsub.DeclareAndBindQueue(
 		gatewayCh,
 		pubsub.ExchangeIonbusTopic,
 		cfg.ID,
 		pubsub.Durable,
-		fmt.Sprintf("gateways.%s.#", cfg.ID),
+		gatewayRoutingKey,
+		nil,
+	)
+	if err != nil {
+		log.Fatalf("Failed to create/open %s: %v", cfg.ID, err)
+	}
+
+	// Bind to gateway-id.clients.#
+	clientsRoutingKey := fmt.Sprintf("%s.%s.#", gatewayQueueName, pubsub.ClientsPrefix)
+	_, err = pubsub.DeclareAndBindQueue(
+		gatewayCh,
+		pubsub.ExchangeIonbusTopic,
+		gatewayQueueName,
+		pubsub.Durable,
+		clientsRoutingKey,
 		nil,
 	)
 	if err != nil {
@@ -121,4 +131,54 @@ func run(ctx context.Context) {
 	// ========================
 	<-ctx.Done()
 	log.Println("Context cancelled, shutting down gracefully...")
+}
+
+// Grabs the Gateway .env, loads it, and returns the Gateway Config ptr
+func LoadGatewayEnv() *GatewayConfig {
+	if err := godotenv.Load("./cmd/gateway/.env"); err != nil {
+		log.Fatalf("Error loading .env: %v", err)
+	}
+	cfg, err := LoadGatewayConfig()
+	if err != nil {
+		log.Fatalf("Failed to load gateway config: %v", err)
+	}
+	return cfg
+}
+
+// Connects to the MQTT broker using the Gateway Config's Parameters
+func ConnectMQTT(cfg *GatewayConfig) mqtt.Client {
+	opts := mqtt.NewClientOptions().
+		AddBroker(cfg.MQTT.GetUrl()).
+		SetKeepAlive(cfg.MQTT.KeepAlive).
+		SetCleanSession(cfg.MQTT.CleanSession).
+		SetClientID(cfg.ID).
+		SetUsername(cfg.MQTT.Username).
+		SetPassword(cfg.MQTT.Password)
+
+	client := mqtt.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
+	}
+	log.Println("Successfully connected to MQTT")
+	return client
+}
+
+// Connects to RabbitMQ using the Gateway Config's Parameters
+func ConnectRMQ(cfg *GatewayConfig) *amqp.Connection {
+	conn, err := amqp.Dial(cfg.RMQ.GetUrl())
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v\n", err)
+	}
+	log.Println("Sucessfully connected to RabbitMQ")
+
+	return conn
+}
+
+// Opens a channel on RabbitMQ, returns the channel
+func OpenChannel(conn *amqp.Connection) *amqp.Channel {
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open RabbitMQ channel: %v", err)
+	}
+	return ch
 }

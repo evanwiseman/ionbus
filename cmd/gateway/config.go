@@ -12,21 +12,23 @@ type GatewayConfig struct {
 	RMQ  config.RMQConfig
 }
 
-func LoadGatewayConfig() (GatewayConfig, error) {
+func LoadGatewayConfig() (*GatewayConfig, error) {
 	id := os.Getenv("GATEWAY_ID")
 	mqttConfig, err := config.LoadMQTTConfig()
 	if err != nil {
-		return GatewayConfig{}, err
+		return nil, err
 	}
 
 	rmqConfig, err := config.LoadRMQConfig()
 	if err != nil {
-		return GatewayConfig{}, err
+		return nil, err
 	}
 
-	return GatewayConfig{
+	cfg := GatewayConfig{
 		ID:   id,
 		MQTT: mqttConfig,
 		RMQ:  rmqConfig,
-	}, nil
+	}
+
+	return &cfg, nil
 }

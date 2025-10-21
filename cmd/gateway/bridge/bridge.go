@@ -13,6 +13,7 @@ import (
 type Bridge struct {
 	RMQCh      *amqp.Channel
 	MQTTClient mqtt.Client
+	Filter     func(topic string, payload []byte) bool
 }
 
 // RMQToMQTT creates a unidirectional bridge that forwards messages from a RabbitMQ queue to an MQTT topic.
@@ -81,13 +82,11 @@ func (b *Bridge) RMQToMQTT(
 		subOpts,
 		contentType,
 		func(msg any) pubsub.AckType {
-			if err := pubsub.PublishMQTT(
-				ctx,
-				b.MQTTClient,
-				pubOpts,
-				contentType,
-				msg,
-			); err != nil {
+			payload, _ := models.Marshal(msg, contentType) // serialize
+			if b.Filter != nil && !b.Filter(subOpts.QueueName, payload) {
+				return pubsub.Ack // skip forwarding but ack the message
+			}
+			if err := pubsub.PublishMQTT(ctx, b.MQTTClient, pubOpts, contentType, msg); err != nil {
 				log.Printf("Bridge RMQ->MQTT publish failed: %v", err)
 				return pubsub.NackRequeue
 			}
@@ -173,13 +172,11 @@ func (b *Bridge) MQTTToRMQ(
 		subOpts,
 		contentType,
 		func(msg any) pubsub.AckType {
-			if err := pubsub.PublishRMQ(
-				ctx,
-				b.RMQCh,
-				pubOpts,
-				contentType,
-				msg,
-			); err != nil {
+			payload, _ := models.Marshal(msg, contentType)
+			if b.Filter != nil && !b.Filter(subOpts.Topic, payload) {
+				return pubsub.Ack // skip forwarding
+			}
+			if err := pubsub.PublishRMQ(ctx, b.RMQCh, pubOpts, contentType, msg); err != nil {
 				log.Printf("Bridge MQTT->RMQ publish failed: %v", err)
 				return pubsub.NackRequeue
 			}
