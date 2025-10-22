@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 )
 
 func cleanup() {

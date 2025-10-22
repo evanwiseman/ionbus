@@ -30,6 +30,7 @@ func (dbc DBConfig) GetUrl() string {
 }
 
 func LoadDBConfig() (DBConfig, error) {
+	dbSchema := os.Getenv("DB_SCHEMA")
 	dbHost := os.Getenv("DB_HOST")
 	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
 	if err != nil {
@@ -41,6 +42,7 @@ func LoadDBConfig() (DBConfig, error) {
 	dbSSLMode := os.Getenv("DB_SSLMODE")
 
 	return DBConfig{
+		Schema:   dbSchema,
 		Host:     dbHost,
 		Port:     dbPort,
 		Username: dbUsername,
