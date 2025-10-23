@@ -19,7 +19,7 @@ func (s *Server) SendGatewayCommand(gatewayID string, command models.Command) er
 	err := pubsub.PublishRMQ(
 		s.Ctx,
 		s.CommandCh,
-		pubsub.RMQPublishOptions{
+		pubsub.RMQPubOpts{
 			Exchange: pubsub.GetGatewayCommandTopicX(),
 			Key:      key,
 		},
@@ -37,7 +37,7 @@ func (s *Server) BroadcastGatewayCommand(command models.Command) error {
 	err := pubsub.PublishRMQ(
 		s.Ctx,
 		s.CommandCh,
-		pubsub.RMQPublishOptions{
+		pubsub.RMQPubOpts{
 			Exchange: pubsub.GetGatewayCommandBroadcastX(),
 			Key:      "", // ignored for fanout
 		},

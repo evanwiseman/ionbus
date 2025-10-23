@@ -19,7 +19,7 @@ func (g *Gateway) SendServerCommand(serverID string, command models.Command) err
 	err := pubsub.PublishRMQ(
 		g.Ctx,
 		g.CommandCh,
-		pubsub.RMQPublishOptions{
+		pubsub.RMQPubOpts{
 			Exchange: pubsub.GetServerCommandTopicX(),
 			Key:      key,
 		},
@@ -37,7 +37,7 @@ func (g *Gateway) BroadcastServerCommand(command models.Command) error {
 	err := pubsub.PublishRMQ(
 		g.Ctx,
 		g.CommandCh,
-		pubsub.RMQPublishOptions{
+		pubsub.RMQPubOpts{
 			Exchange: pubsub.GetServerCommandBroadcastX(),
 			Key:      "", // ignored for fanout
 		},

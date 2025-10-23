@@ -72,8 +72,8 @@ type Bridge struct {
 //	RMQ Queue: "data" -> MQTT Topic: "data" -> RMQ Queue: "data"
 func (b *Bridge) RMQToMQTT(
 	ctx context.Context,
-	subOpts pubsub.RMQSubscribeOptions,
-	pubOpts pubsub.MQTTPublishOptions,
+	subOpts pubsub.RMQSubOpts,
+	pubOpts pubsub.MQTTPubOpts,
 	contentType models.ContentType,
 ) error {
 	err := pubsub.SubscribeRMQ(
@@ -162,8 +162,8 @@ func (b *Bridge) RMQToMQTT(
 //	MQTT Topic: "sync" -> RMQ Queue: "sync" -> MQTT Topic: "sync"
 func (b *Bridge) MQTTToRMQ(
 	ctx context.Context,
-	subOpts pubsub.MQTTSubscribeOptions,
-	pubOpts pubsub.RMQPublishOptions,
+	subOpts pubsub.MQTTSubOpts,
+	pubOpts pubsub.RMQPubOpts,
 	contentType models.ContentType,
 ) error {
 	err := pubsub.SubscribeMQTT(
@@ -221,10 +221,10 @@ func (b *Bridge) MQTTToRMQ(
 // No loop possible because paths are completely separate.
 func (b *Bridge) BidirectionalBridge(
 	ctx context.Context,
-	rmqSubOpts pubsub.RMQSubscribeOptions,
-	mqttPubOpts pubsub.MQTTPublishOptions,
-	mqttSubOpts pubsub.MQTTSubscribeOptions,
-	rmqPubOpts pubsub.RMQPublishOptions,
+	rmqSubOpts pubsub.RMQSubOpts,
+	mqttPubOpts pubsub.MQTTPubOpts,
+	mqttSubOpts pubsub.MQTTSubOpts,
+	rmqPubOpts pubsub.RMQPubOpts,
 	contentType models.ContentType,
 ) error {
 	// Start RMQ -> MQTT bridge

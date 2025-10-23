@@ -21,8 +21,9 @@ type Server struct {
 	Cfg        *ServerConfig
 	DB         *sql.DB
 	Conn       *amqp.Connection
-	DeadCh     *amqp.Channel
 	CommandCh  *amqp.Channel
+	DeadCh     *amqp.Channel
+	PublishCh  *amqp.Channel
 	ResponseCh *amqp.Channel
 }
 
@@ -88,17 +89,23 @@ func (s *Server) Close() {
 
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (s *Server) setupRabbitMQ() error {
-	ch, err := s.Conn.Channel()
+	deadCh, err := pubsub.OpenChannel(s.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
-	s.DeadCh = ch
-	if err := pubsub.DeclareDLX(ch); err != nil {
-		return fmt.Errorf("failed to declare dead letter exchange")
+	s.DeadCh = deadCh
+	if err := pubsub.DeclareDLX(deadCh); err != nil {
+		return err
 	}
-	if err := pubsub.DeclareAndBindDLQ(ch); err != nil {
-		return fmt.Errorf("failed to declare dead letter queue")
+	if err := pubsub.DeclareAndBindDLQ(deadCh); err != nil {
+		return err
 	}
+
+	pubCh, err := pubsub.OpenChannel(s.Conn)
+	if err != nil {
+		return err
+	}
+	s.PublishCh = pubCh
 
 	// Setup Commands (Commands to the server sent from other devices, really only requests)
 	if err := s.setupCommands(); err != nil {
@@ -114,69 +121,62 @@ func (s *Server) setupRabbitMQ() error {
 }
 
 func (s *Server) setupCommands() error {
-	ch, err := s.Conn.Channel()
+	ch, err := pubsub.OpenChannel(s.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	s.CommandCh = ch
 
 	// Ensure the server has a command exchange
 	if err := pubsub.DeclareServerCommandTopicX(ch); err != nil {
-		return fmt.Errorf("failed to declare command topic: %w", err)
+		return err
 	}
 	if err := pubsub.DeclareServerCommandBroadcastX(ch); err != nil {
-		return fmt.Errorf("failed to declare command broadcast: %w", err)
+		return err
 	}
 
-	// Create the server command queue
-	queueName := pubsub.GetServerCommandQ(s.Cfg.ID)
-	_, err = ch.QueueDeclare(
-		queueName,
-		false,
-		true,
-		true,
-		false,
-		amqp.Table{
+	// Queue Parameters
+	name := pubsub.GetServerCommandQ(s.Cfg.ID)
+	opts := pubsub.QueueOpts{
+		Durable:    false,
+		AutoDelete: true,
+		Exclusive:  true,
+		NoWait:     false,
+		Args: amqp.Table{
 			"x-dead-letter-exchange": pubsub.XIonbusDlx,
 		},
-	)
+	}
+
+	// Declare the commands queue
+	_, err = pubsub.DeclareQueue(ch, name, opts)
 	if err != nil {
-		return fmt.Errorf("failed to declare %s: %w", queueName, err)
+		return err
 	}
 
 	// Bind queue to topic exchange
-	if err := ch.QueueBind(
-		queueName,
-		pubsub.GetServerCommandRK(s.Cfg.ID, "#"),
-		pubsub.GetServerCommandTopicX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind to topic exchange: %w", err)
+	key := pubsub.GetServerCommandRK(s.Cfg.ID, "#")
+	topicX := pubsub.GetServerCommandTopicX()
+	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+		return err
 	}
 
 	// Bind queue to broadcast exchange
-	if err := ch.QueueBind(
-		queueName,
-		"",
-		pubsub.GetServerCommandBroadcastX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind to broadcast exchange: %w", err)
+	broadcastX := pubsub.GetServerCommandBroadcastX()
+	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
+		return err
 	}
 
 	// Subscribe to server commands sent by gateway
 	if err := pubsub.SubscribeRMQ(
 		s.Ctx,
 		ch,
-		pubsub.RMQSubscribeOptions{
-			QueueName: queueName,
+		pubsub.RMQSubOpts{
+			QueueName: name,
 		},
 		models.ContentJSON,
 		s.HandlerServerCommands,
 	); err != nil {
-		return fmt.Errorf("failed to subscribe to command queue: %w", err)
+		return err
 	}
 
 	return nil
@@ -184,51 +184,48 @@ func (s *Server) setupCommands() error {
 
 func (s *Server) setupResponses() error {
 	// Create the response channel
-	ch, err := s.Conn.Channel()
+	ch, err := pubsub.OpenChannel(s.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	s.ResponseCh = ch
 
 	// Ensure the server has a response exchange
 	if err := pubsub.DeclareServerResponseTopicX(ch); err != nil {
-		return fmt.Errorf("failed to declare request topic: %w", err)
+		return err
 	}
 
-	// Create the server response queue
-	queueName := pubsub.GetServerResponseQ(s.Cfg.ID)
-	_, err = ch.QueueDeclare(
-		queueName,
-		false,
-		true,
-		true,
-		false,
-		amqp.Table{
+	// Queue parameters
+	name := pubsub.GetServerResponseQ(s.Cfg.ID)
+	opts := pubsub.QueueOpts{
+		Durable:    false,
+		AutoDelete: true,
+		Exclusive:  true,
+		NoWait:     false,
+		Args: amqp.Table{
 			"x-dead-letter-exchange": pubsub.XIonbusDlx,
 		},
-	)
+	}
+
+	// Declare the response queue
+	_, err = pubsub.DeclareQueue(ch, name, opts)
 	if err != nil {
-		return fmt.Errorf("failed to declare %s: %w", queueName, err)
+		return err
 	}
 
 	// Bind Queue to gateway responses
-	routingKey := pubsub.GetGatewayResponseRK("*", "#")
-	if err := ch.QueueBind(
-		queueName,
-		routingKey,
-		pubsub.GetServerResponseTopicX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
+	key := pubsub.GetGatewayResponseRK("*", "#")
+	topicX := pubsub.GetServerResponseTopicX()
+	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+		return err
 	}
 
 	// Subscribe to responses published
 	if err := pubsub.SubscribeRMQ(
 		s.Ctx,
 		ch,
-		pubsub.RMQSubscribeOptions{
-			QueueName: queueName,
+		pubsub.RMQSubOpts{
+			QueueName: name,
 		},
 		models.ContentJSON,
 		func(msg any) pubsub.AckType {
@@ -236,7 +233,7 @@ func (s *Server) setupResponses() error {
 			return pubsub.Ack
 		},
 	); err != nil {
-		return fmt.Errorf("failed to subscribe to queue: %w", err)
+		return err
 	}
 
 	return nil

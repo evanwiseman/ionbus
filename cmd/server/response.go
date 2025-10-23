@@ -13,7 +13,7 @@ func (s *Server) Server2GatewayResponse(res models.Response) error {
 	pubsub.PublishRMQ(
 		s.Ctx,
 		s.ResponseCh,
-		pubsub.RMQPublishOptions{
+		pubsub.RMQPubOpts{
 			Exchange: pubsub.GetGatewayResponseTopicX(),
 			Key:      key,
 		},

@@ -10,10 +10,21 @@ import (
 	"github.com/evanwiseman/ionbus/internal/models"
 )
 
+type MQTTPubOpts struct {
+	Topic    string
+	QoS      byte
+	Retained bool
+}
+
+type MQTTSubOpts struct {
+	Topic string
+	QoS   byte
+}
+
 func PublishMQTT[T any](
 	ctx context.Context,
 	client mqtt.Client,
-	opts MQTTPublishOptions,
+	opts MQTTPubOpts,
 	contentType models.ContentType,
 	val T,
 ) error {
@@ -47,7 +58,7 @@ func PublishMQTT[T any](
 func SubscribeMQTT[T any](
 	ctx context.Context,
 	client mqtt.Client,
-	opts MQTTSubscribeOptions,
+	opts MQTTSubOpts,
 	contentType models.ContentType,
 	handler func(T) AckType, // for consistency with rmq
 ) error {

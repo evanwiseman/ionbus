@@ -8,10 +8,30 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type RMQPubOpts struct {
+	Exchange  string
+	Key       string
+	Mandatory bool
+	Immediate bool
+}
+
+type RMQSubOpts struct {
+	QueueName     string
+	Consumer      string
+	AutoAck       bool
+	Exclusive     bool
+	NoLocal       bool
+	NoWait        bool
+	PrefetchCount int
+	PrefetchSize  int
+	QosGlobal     bool
+	Args          amqp.Table
+}
+
 func PublishRMQ[T any](
 	ctx context.Context,
 	ch *amqp.Channel,
-	opts RMQPublishOptions,
+	opts RMQPubOpts,
 	contentType models.ContentType,
 	val T,
 ) error {
@@ -43,7 +63,7 @@ func PublishRMQ[T any](
 func SubscribeRMQ[T any](
 	ctx context.Context,
 	ch *amqp.Channel,
-	opts RMQSubscribeOptions,
+	opts RMQSubOpts,
 	contentType models.ContentType,
 	handler func(T) AckType,
 ) error {

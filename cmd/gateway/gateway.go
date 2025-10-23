@@ -97,22 +97,22 @@ func (g *Gateway) setupMQTT() error {
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (g *Gateway) setupRMQ() error {
 	// Setup dead lettering
-	deadCh, err := g.Conn.Channel()
+	deadCh, err := pubsub.OpenChannel(g.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	g.DeadCh = deadCh
 	if err := pubsub.DeclareDLX(deadCh); err != nil {
-		return fmt.Errorf("failed to declare ionbus_dlx: %w", err)
+		return err
 	}
 	if err := pubsub.DeclareAndBindDLQ(deadCh); err != nil {
-		return fmt.Errorf("failed to declare ionbus_dlq: %w", err)
+		return err
 	}
 
 	// Setup publisher channel
-	pubCh, err := g.Conn.Channel()
+	pubCh, err := pubsub.OpenChannel(g.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	g.PublishCh = pubCh
 
@@ -131,69 +131,60 @@ func (g *Gateway) setupRMQ() error {
 // Creates a commands queue to listen for server commands
 func (g *Gateway) setupCommands() error {
 	// Declare Exchanges
-	ch, err := g.Conn.Channel()
+	ch, err := pubsub.OpenChannel(g.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	g.CommandCh = ch
 	if err := pubsub.DeclareGatewayCommandTopicX(ch); err != nil {
-		return fmt.Errorf("failed to declare command topic: %w", err)
+		return err
 	}
 	if err := pubsub.DeclareGatewayCommandBroadcastX(ch); err != nil {
-		return fmt.Errorf("failed to declare command broadcast: %w", err)
+		return err
 	}
 
-	queueName := pubsub.GetGatewayCommandQ(g.Cfg.ID)
-	routingKey := pubsub.GetGatewayCommandRK(g.Cfg.ID, "#")
-
-	// Declare queue for gateway commands
-	_, err = ch.QueueDeclare(
-		queueName,
-		false,
-		true,
-		true,
-		false,
-		amqp.Table{
+	// Queue Parameters
+	name := pubsub.GetGatewayCommandQ(g.Cfg.ID)
+	opts := pubsub.QueueOpts{
+		Durable:    false,
+		AutoDelete: true,
+		Exclusive:  true,
+		NoWait:     false,
+		Args: amqp.Table{
 			"x-dead-letter-exchange": pubsub.XIonbusDlx,
 		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare %s: %w", queueName, err)
 	}
 
-	// Bind queue to topic exchange
-	if err := ch.QueueBind(
-		queueName,
-		routingKey,
-		pubsub.GetGatewayCommandTopicX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
+	// Declare the command queue
+	_, err = pubsub.DeclareQueue(ch, name, opts)
+	if err != nil {
+		return err
+	}
+
+	// Bind queue to gateway topic exchange
+	key := pubsub.GetGatewayCommandRK(g.Cfg.ID, "#")
+	topicX := pubsub.GetGatewayCommandTopicX()
+	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+		return err
 	}
 
 	// Bind queue to broadcast exchange
-	if err := ch.QueueBind(
-		queueName,
-		"",
-		pubsub.GetGatewayCommandBroadcastX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind %s to broadcast exchange: %w", queueName, err)
+	broadcastX := pubsub.GetGatewayCommandBroadcastX()
+	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
+		return err
 	}
 
 	// Subscribe to gateway commands sent by server
 	if err := pubsub.SubscribeRMQ(
 		g.Ctx,
 		ch,
-		pubsub.RMQSubscribeOptions{
-			QueueName: queueName,
+		pubsub.RMQSubOpts{
+			QueueName: name,
 		},
 		models.ContentJSON,
 		g.HandlerGatewayCommands,
 	); err != nil {
-		return fmt.Errorf("failed to subscribe to queue: %w", err)
+		return err
 	}
 
 	return nil
@@ -201,49 +192,46 @@ func (g *Gateway) setupCommands() error {
 
 // Creates a channel to send responses on
 func (g *Gateway) setupResponses() error {
-	ch, err := g.Conn.Channel()
+	ch, err := pubsub.OpenChannel(g.Conn)
 	if err != nil {
-		return fmt.Errorf("failed to open channel: %w", err)
+		return err
 	}
 	g.ResponseCh = ch
 
 	if err := pubsub.DeclareGatewayResponseTopicX(ch); err != nil {
-		return fmt.Errorf("failed to declare response topic: %w", err)
+		return err
 	}
 
-	queueName := pubsub.GetGatewayResponseQ(g.Cfg.ID)
-	_, err = ch.QueueDeclare(
-		queueName,
-		false,
-		true,
-		true,
-		false,
-		amqp.Table{
+	name := pubsub.GetGatewayResponseQ(g.Cfg.ID)
+	opts := pubsub.QueueOpts{
+		Durable:    false,
+		AutoDelete: true,
+		Exclusive:  true,
+		NoWait:     false,
+		Args: amqp.Table{
 			"x-dead-letter-exchange": pubsub.XIonbusDlx,
 		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare %s: %w", queueName, err)
 	}
 
-	// Bind to Queue to server responses
-	routingKey := pubsub.GetServerResponseRK("*", "#")
-	if err := ch.QueueBind(
-		queueName,
-		routingKey,
-		pubsub.GetGatewayResponseTopicX(),
-		false,
-		nil,
-	); err != nil {
-		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
+	// Declare the Response Queue
+	_, err = pubsub.DeclareQueue(ch, name, opts)
+	if err != nil {
+		return err
+	}
+
+	// Bind to Queue to server responses key
+	key := pubsub.GetServerResponseRK("*", "#")
+	topicX := pubsub.GetGatewayResponseTopicX()
+	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+		return err
 	}
 
 	// Subscribe to responses published
 	if err := pubsub.SubscribeRMQ(
 		g.Ctx,
 		ch,
-		pubsub.RMQSubscribeOptions{
-			QueueName: queueName,
+		pubsub.RMQSubOpts{
+			QueueName: name,
 		},
 		models.ContentJSON,
 		func(msg any) pubsub.AckType {
@@ -251,7 +239,7 @@ func (g *Gateway) setupResponses() error {
 			return pubsub.Ack
 		},
 	); err != nil {
-		return fmt.Errorf("failed to subscribe to queue: %w", err)
+		return err
 	}
 
 	return nil
