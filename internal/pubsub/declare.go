@@ -38,6 +38,34 @@ func DeclareGatewayCommandBroadcastX(
 	)
 }
 
+func DeclareServerCommandTopicX(
+	ch *amqp.Channel,
+) error {
+	return ch.ExchangeDeclare(
+		GetServerCommandTopicX(),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+}
+
+func DeclareServerCommandBroadcastX(
+	ch *amqp.Channel,
+) error {
+	return ch.ExchangeDeclare(
+		GetServerCommandBroadcastX(),
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+}
+
 // ========================
 // Responses
 // ========================
@@ -47,6 +75,20 @@ func DeclareGatewayResponseTopicX(
 ) error {
 	return ch.ExchangeDeclare(
 		GetGatewayResponseTopicX(),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+}
+
+func DeclareServerResponseTopicX(
+	ch *amqp.Channel,
+) error {
+	return ch.ExchangeDeclare(
+		GetServerResponseTopicX(),
 		"topic",
 		true,
 		false,

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
@@ -17,6 +18,7 @@ type Gateway struct {
 	Conn       *amqp.Connection
 	CommandCh  *amqp.Channel
 	DeadCh     *amqp.Channel
+	PublishCh  *amqp.Channel
 	ResponseCh *amqp.Channel
 }
 
@@ -61,7 +63,8 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 }
 
 func (g *Gateway) Start() error {
-	// TODO
+	g.RequestServerIdentifiers("*", nil, "device initialization")
+
 	return nil
 }
 
@@ -71,6 +74,12 @@ func (g *Gateway) Close() {
 	}
 	if g.CommandCh != nil {
 		g.CommandCh.Close()
+	}
+	if g.DeadCh != nil {
+		g.DeadCh.Close()
+	}
+	if g.PublishCh != nil {
+		g.PublishCh.Close()
 	}
 	if g.ResponseCh != nil {
 		g.ResponseCh.Close()
@@ -88,17 +97,24 @@ func (g *Gateway) setupMQTT() error {
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (g *Gateway) setupRMQ() error {
 	// Setup dead lettering
-	ch, err := g.Conn.Channel()
+	deadCh, err := g.Conn.Channel()
 	if err != nil {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
-	g.DeadCh = ch
-	if err := pubsub.DeclareDLX(ch); err != nil {
+	g.DeadCh = deadCh
+	if err := pubsub.DeclareDLX(deadCh); err != nil {
 		return fmt.Errorf("failed to declare ionbus_dlx: %w", err)
 	}
-	if err := pubsub.DeclareAndBindDLQ(ch); err != nil {
+	if err := pubsub.DeclareAndBindDLQ(deadCh); err != nil {
 		return fmt.Errorf("failed to declare ionbus_dlq: %w", err)
 	}
+
+	// Setup publisher channel
+	pubCh, err := g.Conn.Channel()
+	if err != nil {
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	g.PublishCh = pubCh
 
 	// Setup commands for gateway from the server
 	if err := g.setupCommands(); err != nil {
@@ -190,6 +206,53 @@ func (g *Gateway) setupResponses() error {
 		return fmt.Errorf("failed to open channel: %w", err)
 	}
 	g.ResponseCh = ch
+
+	if err := pubsub.DeclareGatewayResponseTopicX(ch); err != nil {
+		return fmt.Errorf("failed to declare response topic: %w", err)
+	}
+
+	queueName := pubsub.GetGatewayResponseQ(g.Cfg.ID)
+	_, err = ch.QueueDeclare(
+		queueName,
+		false,
+		true,
+		true,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange": pubsub.XIonbusDlx,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare %s: %w", queueName, err)
+	}
+
+	// Bind to Queue to server responses
+	routingKey := pubsub.GetServerResponseRK("*", "#")
+	if err := ch.QueueBind(
+		queueName,
+		routingKey,
+		pubsub.GetGatewayResponseTopicX(),
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
+	}
+
+	// Subscribe to responses published
+	if err := pubsub.SubscribeRMQ(
+		g.Ctx,
+		ch,
+		pubsub.RMQSubscribeOptions{
+			QueueName: queueName,
+		},
+		models.ContentJSON,
+		func(msg any) pubsub.AckType {
+			log.Println(msg)
+			return pubsub.Ack
+		},
+	); err != nil {
+		return fmt.Errorf("failed to subscribe to queue: %w", err)
+	}
 
 	return nil
 }

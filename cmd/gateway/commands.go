@@ -13,14 +13,14 @@ import (
 // Send
 // ========================
 
-func (s *Server) SendGatewayCommand(gatewayID string, command models.Command) error {
-	key := fmt.Sprintf("%s.%s.%s.#", pubsub.GatewayPrefix, gatewayID, pubsub.CommandPrefix)
+func (g *Gateway) SendServerCommand(serverID string, command models.Command) error {
+	key := pubsub.GetServerCommandRK(serverID, "#")
 
 	err := pubsub.PublishRMQ(
-		s.Ctx,
-		s.CommandCh,
+		g.Ctx,
+		g.CommandCh,
 		pubsub.RMQPublishOptions{
-			Exchange: pubsub.GetGatewayCommandTopicX(),
+			Exchange: pubsub.GetServerCommandTopicX(),
 			Key:      key,
 		},
 		models.ContentJSON,
@@ -33,12 +33,12 @@ func (s *Server) SendGatewayCommand(gatewayID string, command models.Command) er
 	return nil
 }
 
-func (s *Server) BroadcastGatewayCommand(command models.Command) error {
+func (g *Gateway) BroadcastServerCommand(command models.Command) error {
 	err := pubsub.PublishRMQ(
-		s.Ctx,
-		s.CommandCh,
+		g.Ctx,
+		g.CommandCh,
 		pubsub.RMQPublishOptions{
-			Exchange: pubsub.GetGatewayCommandBroadcastX(),
+			Exchange: pubsub.GetServerCommandBroadcastX(),
 			Key:      "", // ignored for fanout
 		},
 		models.ContentJSON,
@@ -56,8 +56,8 @@ func (s *Server) BroadcastGatewayCommand(command models.Command) error {
 // Requests
 // ========================
 
-func (s *Server) RequestGatewayIdentifiers(
-	gatewayID string,
+func (g *Gateway) RequestServerIdentifiers(
+	serverID string,
 	filters map[string]interface{},
 	reason string,
 ) error {
@@ -69,22 +69,22 @@ func (s *Server) RequestGatewayIdentifiers(
 			Reason:    reason,
 		},
 	}
-	if gatewayID == "*" || gatewayID == "" {
-		return s.BroadcastGatewayCommand(cmd)
+	if serverID == "*" || serverID == "" {
+		return g.BroadcastServerCommand(cmd)
 	}
-	return s.SendGatewayCommand(gatewayID, cmd)
+	return g.SendServerCommand(serverID, cmd)
 }
 
 // ========================
 // Handlers
 // ========================
 
-func (s *Server) HandlerServerCommands(command models.Command) pubsub.AckType {
+func (g *Gateway) HandlerGatewayCommands(command models.Command) pubsub.AckType {
 	switch command.Name {
 	case "request":
 		// handle request
-		err := s.Server2GatewayResponse(models.Response{
-			Name:      s.Cfg.ID,
+		err := g.Gateway2ServerResponse(models.Response{
+			Name:      g.Cfg.ID,
 			Status:    "",
 			Data:      nil,
 			Timestamp: time.Now(),
@@ -93,6 +93,10 @@ func (s *Server) HandlerServerCommands(command models.Command) pubsub.AckType {
 			log.Printf("failed to send response: %v", err)
 		}
 		log.Printf("received request command: %v", command.Args)
+	case "restart":
+		log.Printf("received restart command: %v", command.Args)
+	case "update":
+		log.Printf("received update command: %v", command.Args)
 	default:
 		return pubsub.NackDiscard
 	}

@@ -7,14 +7,14 @@ import (
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
-func (g *Gateway) Gateway2ServerResponse(res models.Response) error {
-	key := pubsub.GetGatewayResponseRK(g.Cfg.ID, "#")
+func (s *Server) Server2GatewayResponse(res models.Response) error {
+	key := pubsub.GetServerResponseRK(s.Cfg.ID, "#")
 	log.Printf("Sending response to %s", key)
 	pubsub.PublishRMQ(
-		g.Ctx,
-		g.ResponseCh,
+		s.Ctx,
+		s.ResponseCh,
 		pubsub.RMQPublishOptions{
-			Exchange: pubsub.GetServerResponseTopicX(),
+			Exchange: pubsub.GetGatewayResponseTopicX(),
 			Key:      key,
 		},
 		models.ContentJSON,
