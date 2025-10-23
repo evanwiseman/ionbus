@@ -8,55 +8,49 @@ import (
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/evanwiseman/ionbus/internal/util"
 	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+// ========================
+// Server
+// ========================
+
 type Server struct {
-	Ctx           context.Context
-	Cfg           *ServerConfig
-	RMQConn       *amqp.Connection
-	RMQPublishCh  *amqp.Channel
-	RMQResponseCh *amqp.Channel
-	DB            *sql.DB
+	Ctx        context.Context
+	Cfg        *ServerConfig
+	DB         *sql.DB
+	Conn       *amqp.Connection
+	DeadCh     *amqp.Channel
+	ResponseCh *amqp.Channel
 }
 
 // Create a new server from the config passed in
 func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
-	rmqConn, err := util.ConnectRMQ(cfg.RMQ)
-	if err != nil {
-		return nil, fmt.Errorf("failed to establish connection to rabbitmq: %w", err)
-	}
-	db, err := util.ConnectDB(cfg.DB)
+	db, err := sql.Open(cfg.DB.Schema, cfg.DB.GetUrl())
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish connection to database: %w", err)
 	}
 
+	conn, err := amqp.Dial(cfg.RMQ.GetUrl())
+	if err != nil {
+		return nil, fmt.Errorf("failed to establish connection to rabbitmq: %w", err)
+	}
+
 	server := &Server{
-		Ctx:          ctx,
-		Cfg:          cfg,
-		RMQConn:      rmqConn,
-		RMQPublishCh: nil,
-		DB:           db,
+		Ctx:  ctx,
+		Cfg:  cfg,
+		DB:   db,
+		Conn: conn,
 	}
 
 	// Setup infrastructure
-	rmqPub, err := server.setupRabbitMQ()
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup rabbitmq: %w", err)
-	}
-	server.RMQPublishCh = rmqPub
-
-	// Store the response channel!
-	rmqResponseCh, _, err := server.setupResponses()
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup responses: %w", err)
-	}
-	server.RMQResponseCh = rmqResponseCh
-
 	if err := server.setupDatabase(); err != nil {
 		return nil, fmt.Errorf("failed to setup database: %w", err)
+	}
+
+	if err := server.setupRabbitMQ(); err != nil {
+		return nil, fmt.Errorf("failed to setup rabbitmq: %w", err)
 	}
 
 	return server, nil
@@ -64,80 +58,95 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 // Start begins server operations
 func (s *Server) Start() error {
-	s.RequestGatewayIdentifiersRMQ("*", nil, "device initialization")
+	s.RequestGatewayIdentifiers("*", nil, "device initialization")
 	return nil
 }
 
 // Close gracefully shuts down the server
 func (s *Server) Close() {
-	if s.RMQPublishCh != nil {
-		s.RMQPublishCh.Close()
+	if s.DeadCh != nil {
+		s.DeadCh.Close()
 	}
-	if s.RMQResponseCh != nil {
-		s.RMQResponseCh.Close()
+	if s.ResponseCh != nil {
+		s.ResponseCh.Close()
 	}
-	if s.RMQConn != nil {
-		s.RMQConn.Close()
+	if s.Conn != nil {
+		s.Conn.Close()
 	}
 	if s.DB != nil {
 		s.DB.Close()
 	}
 }
 
+// ========================
+// RabbitMQ
+// ========================
+
 // Setup RabbitMQ topic exchange and dead letter exchange
-func (s *Server) setupRabbitMQ() (*amqp.Channel, error) {
-	ch, err := util.OpenChannel(s.RMQConn)
+func (s *Server) setupRabbitMQ() error {
+	ch, err := s.Conn.Channel()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open rabbitmq channel: %w", err)
+		return fmt.Errorf("failed to open channel: %w", err)
 	}
-
-	if err := pubsub.DeclareIonbusTopic(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus topic exchange: %w", err)
-	}
-	if err := pubsub.DeclareIonbusBroadcast(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus broadcast exchange")
-	}
-
+	s.DeadCh = ch
 	if err := pubsub.DeclareDLX(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare dead letter exchange")
+		return fmt.Errorf("failed to declare dead letter exchange")
 	}
-	if err := pubsub.DeclareDLQ(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare dead letter queue")
+	if err := pubsub.DeclareAndBindDLQ(ch); err != nil {
+		return fmt.Errorf("failed to declare dead letter queue")
 	}
 
-	return ch, nil
-}
+	// Setup Gateway Responses
+	if err := s.setupResponses(); err != nil {
+		return fmt.Errorf("failed to setup responses: %w", err)
+	}
 
-func (s *Server) setupDatabase() error {
-	// TODO
 	return nil
 }
 
-func (s *Server) setupResponses() (*amqp.Channel, amqp.Queue, error) {
-	ch, err := util.OpenChannel(s.RMQConn)
+func (s *Server) setupResponses() error {
+	ch, err := s.Conn.Channel()
 	if err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to open channel: %w", err)
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	s.ResponseCh = ch
+
+	if err := pubsub.DeclareGatewayResponseTopicX(ch); err != nil {
+		return fmt.Errorf("failed to declare request topic: %w", err)
 	}
 
-	name := fmt.Sprintf("%s.%s", pubsub.GatewaysPrefix, pubsub.ResponsesPrefix)
-	key := name
+	queueName := pubsub.GetGatewayResponseQ(s.Cfg.ID)
+	routingKey := pubsub.GetGatewayResponseRK("*", "#")
 
-	q, err := pubsub.DeclareAndBindQueue(
-		ch,
-		pubsub.ExchangeIonbusDirect,
-		name,
-		pubsub.Durable,
-		key,
+	_, err = ch.QueueDeclare(
+		queueName,
+		false,
+		true,
+		true,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange": pubsub.XIonbusDlx,
+		},
 	)
 	if err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to declare and bind direct exchange: %w", err)
+		return fmt.Errorf("failed to declare %s: %w", queueName, err)
+	}
+
+	if err := ch.QueueBind(
+		queueName,
+		routingKey,
+		pubsub.GetGatewayResponseTopicX(),
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
 	}
 
 	if err := pubsub.SubscribeRMQ(
 		s.Ctx,
 		ch,
 		pubsub.RMQSubscribeOptions{
-			QueueName: name,
+			QueueName: queueName,
 		},
 		models.ContentJSON,
 		func(msg any) pubsub.AckType {
@@ -145,8 +154,17 @@ func (s *Server) setupResponses() (*amqp.Channel, amqp.Queue, error) {
 			return pubsub.Ack
 		},
 	); err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to subscribe to queue: %w", err)
+		return fmt.Errorf("failed to subscribe to queue: %w", err)
 	}
 
-	return ch, q, nil
+	return nil
+}
+
+// ========================
+// Database
+// ========================
+
+func (s *Server) setupDatabase() error {
+	// TODO
+	return nil
 }

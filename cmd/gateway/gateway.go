@@ -7,51 +7,55 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/evanwiseman/ionbus/internal/util"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Gateway struct {
-	Ctx           context.Context
-	Cfg           *GatewayConfig
-	MQTTClient    mqtt.Client
-	RMQConn       *amqp.Connection
-	RMQPublishCh  *amqp.Channel
-	RMQCommandsCh *amqp.Channel
+	Ctx        context.Context
+	Cfg        *GatewayConfig
+	Client     mqtt.Client
+	Conn       *amqp.Connection
+	CommandCh  *amqp.Channel
+	DeadCh     *amqp.Channel
+	ResponseCh *amqp.Channel
 }
 
 func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
-	mqttClient, err := util.ConnectMQTT(cfg.MQTT, cfg.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to establish connection to mqtt: %w", err)
+	// MQTT
+	opts := mqtt.NewClientOptions().
+		AddBroker(cfg.MQTT.GetUrl()).
+		SetKeepAlive(cfg.MQTT.KeepAlive).
+		SetCleanSession(cfg.MQTT.CleanSession).
+		SetClientID(cfg.ID).
+		SetUsername(cfg.MQTT.Username).
+		SetPassword(cfg.MQTT.Password)
+
+	client := mqtt.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		return nil, fmt.Errorf("failed to establish connection to mqtt: %w", token.Error())
 	}
-	rmqConn, err := util.ConnectRMQ(cfg.RMQ)
+
+	// RabbitMQ
+	conn, err := amqp.Dial(cfg.RMQ.GetUrl())
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish connection to rabbitmq: %w", err)
 	}
 
 	gateway := &Gateway{
-		Ctx:        ctx,
-		Cfg:        cfg,
-		MQTTClient: mqttClient,
-		RMQConn:    rmqConn,
+		Ctx:    ctx,
+		Cfg:    cfg,
+		Client: client,
+		Conn:   conn,
 	}
 
+	// Setup infrastructure
 	if err := gateway.setupMQTT(); err != nil {
 		return nil, fmt.Errorf("failed to setup mqtt: %w", err)
 	}
 
-	rmqPub, err := gateway.setupRabbitMQ()
-	gateway.RMQPublishCh = rmqPub
-	if err != nil {
+	if err := gateway.setupRMQ(); err != nil {
 		return nil, fmt.Errorf("failed to setup rabbitmq: %w", err)
 	}
-
-	rmqCommandsCh, _, err := gateway.setupCommands()
-	if err != nil {
-		return nil, fmt.Errorf("failed to setup Commands: %w", err)
-	}
-	gateway.RMQCommandsCh = rmqCommandsCh
 
 	return gateway, nil
 }
@@ -62,17 +66,17 @@ func (g *Gateway) Start() error {
 }
 
 func (g *Gateway) Close() {
-	if g.MQTTClient != nil {
-		g.MQTTClient.Disconnect(250)
+	if g.Client != nil {
+		g.Client.Disconnect(250)
 	}
-	if g.RMQPublishCh != nil {
-		g.RMQPublishCh.Close()
+	if g.CommandCh != nil {
+		g.CommandCh.Close()
 	}
-	if g.RMQCommandsCh != nil {
-		g.RMQCommandsCh.Close()
+	if g.ResponseCh != nil {
+		g.ResponseCh.Close()
 	}
-	if g.RMQConn != nil {
-		g.RMQConn.Close()
+	if g.Conn != nil {
+		g.Conn.Close()
 	}
 }
 
@@ -82,67 +86,85 @@ func (g *Gateway) setupMQTT() error {
 }
 
 // Setup RabbitMQ topic exchange and dead letter exchange
-func (g *Gateway) setupRabbitMQ() (*amqp.Channel, error) {
-	ch, err := util.OpenChannel(g.RMQConn)
+func (g *Gateway) setupRMQ() error {
+	// Setup dead lettering
+	ch, err := g.Conn.Channel()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open channel: %w", err)
+		return fmt.Errorf("failed to open channel: %w", err)
 	}
-
-	// Declare exchanges
-	if err := pubsub.DeclareIonbusTopic(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus_topic exchange: %w", err)
-	}
-	if err := pubsub.DeclareIonbusDirect(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus_direct exchange: %w", err)
-	}
-	if err := pubsub.DeclareIonbusBroadcast(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus_broadcast exchange: %w", err)
-	}
-
-	// Declare Dead Lettering
+	g.DeadCh = ch
 	if err := pubsub.DeclareDLX(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus_dlx: %w", err)
+		return fmt.Errorf("failed to declare ionbus_dlx: %w", err)
 	}
-	if err := pubsub.DeclareDLQ(ch); err != nil {
-		return nil, fmt.Errorf("failed to declare ionbus_dlq: %w", err)
+	if err := pubsub.DeclareAndBindDLQ(ch); err != nil {
+		return fmt.Errorf("failed to declare ionbus_dlq: %w", err)
 	}
 
-	return ch, nil
+	// Setup commands for gateway from the server
+	if err := g.setupCommands(); err != nil {
+		return fmt.Errorf("failed to setup commands: %w", err)
+	}
+
+	if err := g.setupResponses(); err != nil {
+		return fmt.Errorf("failed to setup responses: %w", err)
+	}
+
+	return nil
 }
 
-// Queue name = gateway-id.commands,
-// Routing key = gateways.gateway-id.commands.#
-func (g *Gateway) setupCommands() (*amqp.Channel, amqp.Queue, error) {
-	ch, err := util.OpenChannel(g.RMQConn)
+// Creates a commands queue to listen for server commands
+func (g *Gateway) setupCommands() error {
+	// Declare Exchanges
+	ch, err := g.Conn.Channel()
 	if err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to open channel: %w", err)
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	g.CommandCh = ch
+	if err := pubsub.DeclareGatewayCommandTopicX(ch); err != nil {
+		return fmt.Errorf("failed to declare command topic: %w", err)
+	}
+	if err := pubsub.DeclareGatewayCommandBroadcastX(ch); err != nil {
+		return fmt.Errorf("failed to declare command broadcast: %w", err)
 	}
 
-	name := fmt.Sprintf("%s.%s", g.Cfg.ID, pubsub.CommandsPrefix)
-	key := fmt.Sprintf("%s.%s.%s.#", pubsub.GatewaysPrefix, g.Cfg.ID, pubsub.CommandsPrefix)
+	queueName := pubsub.GetGatewayCommandQ(g.Cfg.ID)
+	routingKey := pubsub.GetGatewayCommandRK(g.Cfg.ID, "#")
 
-	// Declare and Bind to topic queue refering to gateway-id
-	q, err := pubsub.DeclareAndBindQueue(
-		ch,
-		pubsub.ExchangeIonbusTopic,
-		name,
-		pubsub.Durable,
-		key,
+	// Declare queue for gateway commands
+	_, err = ch.QueueDeclare(
+		queueName,
+		false,
+		true,
+		true,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange": pubsub.XIonbusDlx,
+		},
 	)
 	if err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to declare and bind topic exchange: %w", err)
+		return fmt.Errorf("failed to declare %s: %w", queueName, err)
 	}
 
-	// ALSO bind to the broadcast exchange for commands to all gateways
-	err = ch.QueueBind(
-		name,
-		"",
-		pubsub.ExchangeIonbusBroadcast,
+	// Bind queue to topic exchange
+	if err := ch.QueueBind(
+		queueName,
+		routingKey,
+		pubsub.GetGatewayCommandTopicX(),
 		false,
 		nil,
-	)
-	if err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to bind broadcast exchange: %w", err)
+	); err != nil {
+		return fmt.Errorf("failed to bind %s to topic exchange: %w", queueName, err)
+	}
+
+	// Bind queue to broadcast exchange
+	if err := ch.QueueBind(
+		queueName,
+		"",
+		pubsub.GetGatewayCommandBroadcastX(),
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to bind %s to broadcast exchange: %w", queueName, err)
 	}
 
 	// Subscribe to gateway commands sent by server
@@ -150,13 +172,24 @@ func (g *Gateway) setupCommands() (*amqp.Channel, amqp.Queue, error) {
 		g.Ctx,
 		ch,
 		pubsub.RMQSubscribeOptions{
-			QueueName: name,
+			QueueName: queueName,
 		},
 		models.ContentJSON,
 		g.HandlerGatewayCommands,
 	); err != nil {
-		return nil, amqp.Queue{}, fmt.Errorf("failed to subscribe to queue: %w", err)
+		return fmt.Errorf("failed to subscribe to queue: %w", err)
 	}
 
-	return ch, q, nil
+	return nil
+}
+
+// Creates a channel to send responses on
+func (g *Gateway) setupResponses() error {
+	ch, err := g.Conn.Channel()
+	if err != nil {
+		return fmt.Errorf("failed to open channel: %w", err)
+	}
+	g.ResponseCh = ch
+
+	return nil
 }
