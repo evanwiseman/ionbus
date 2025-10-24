@@ -7,7 +7,7 @@ services:
         dockerfile: docker/gateway/Dockerfile
       container_name: ionbus_gateway
       env_file:
-      - .env
+      - ./cmd/server/.env
       ports:
         - "${MQTT_PORT}:${MQTT_PORT}"
         - "${MQTT_WS_PORT}:${MQTT_WS_PORT}"
@@ -19,7 +19,7 @@ services:
     image: eclipse-mosquitto:2.0.15
     container_name: ionbus_mqtt
     env_file:
-      - .env
+      - ./cmd/server/.env
     ports:
       - "${MQTT_PORT}:${MQTT_PORT}"
       - "${MQTT_WS_PORT}:${MQTT_WS_PORT}"

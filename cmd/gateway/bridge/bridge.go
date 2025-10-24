@@ -171,16 +171,15 @@ func (b *Bridge) MQTTToRMQ(
 		b.MQTTClient,
 		subOpts,
 		contentType,
-		func(msg any) pubsub.AckType {
+		func(msg any) {
 			payload, _ := models.Marshal(msg, contentType)
 			if b.Filter != nil && !b.Filter(subOpts.Topic, payload) {
-				return pubsub.Ack // skip forwarding
+				return // skip forwarding
 			}
 			if err := pubsub.PublishRMQ(ctx, b.RMQCh, pubOpts, contentType, msg); err != nil {
 				log.Printf("Bridge MQTT->RMQ publish failed: %v", err)
-				return pubsub.NackRequeue
+				return
 			}
-			return pubsub.Ack
 		},
 	)
 	if err == nil {

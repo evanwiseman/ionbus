@@ -7,7 +7,7 @@ services:
       dockerfile: docker/client/Dockerfile
     container_name: ionbus_client
     env_file:
-      - .env
+      - ./cmd/server/.env
     depends_on:
       - client-mqtt-broker
     restart: unless-stopped
@@ -16,7 +16,7 @@ services:
     image: eclipse-mosquitto:2.0.15
     container_name: ionbus_client_mqtt
     env_file:
-      - .env
+      - ./cmd/server/.env
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
       - mqtt_data:/mosquitto/data

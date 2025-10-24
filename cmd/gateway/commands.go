@@ -14,13 +14,13 @@ import (
 // ========================
 
 func (g *Gateway) SendServerCommand(serverID string, command models.Command) error {
-	key := pubsub.GetServerCommandRK(serverID, "#")
+	key := pubsub.GetRMQServerCommandRK(serverID, "")
 
 	err := pubsub.PublishRMQ(
 		g.Ctx,
 		g.CommandCh,
 		pubsub.RMQPubOpts{
-			Exchange: pubsub.GetServerCommandTopicX(),
+			Exchange: pubsub.GetRMQServerCommandTopicX(),
 			Key:      key,
 		},
 		models.ContentJSON,
@@ -38,7 +38,7 @@ func (g *Gateway) BroadcastServerCommand(command models.Command) error {
 		g.Ctx,
 		g.CommandCh,
 		pubsub.RMQPubOpts{
-			Exchange: pubsub.GetServerCommandBroadcastX(),
+			Exchange: pubsub.GetRMQServerCommandBroadcastX(),
 			Key:      "", // ignored for fanout
 		},
 		models.ContentJSON,
@@ -47,6 +47,42 @@ func (g *Gateway) BroadcastServerCommand(command models.Command) error {
 
 	if err != nil {
 		return fmt.Errorf("failed broadcasting command: %w", err)
+	}
+
+	return nil
+}
+
+func (g *Gateway) SendClientCommand(clientID string, command models.Command) error {
+	err := pubsub.PublishMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTPubOpts{
+			Topic: pubsub.GetMQTTClientCommandTopic(clientID, ""),
+			QoS:   1,
+		},
+		models.ContentJSON,
+		command,
+	)
+	if err != nil {
+		return fmt.Errorf("failed sending command: %w", err)
+	}
+
+	return nil
+}
+
+func (g *Gateway) BroadcastClientCommand(command models.Command) error {
+	err := pubsub.PublishMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTPubOpts{
+			Topic: pubsub.GetMQTTClientCommandBroadcast(""),
+			QoS:   1,
+		},
+		models.ContentJSON,
+		command,
+	)
+	if err != nil {
+		return fmt.Errorf("failed sending command: %w", err)
 	}
 
 	return nil
@@ -73,6 +109,25 @@ func (g *Gateway) RequestServerIdentifiers(
 		return g.BroadcastServerCommand(cmd)
 	}
 	return g.SendServerCommand(serverID, cmd)
+}
+
+func (g *Gateway) RequestClientIdentifiers(
+	clientID string,
+	filters map[string]interface{},
+	reason string,
+) error {
+	cmd := models.Command{
+		Name: "request",
+		Args: models.RequestArgs{
+			Filters:   filters,
+			Timestamp: time.Now(),
+			Reason:    reason,
+		},
+	}
+	if clientID == "+" || clientID == "" {
+		return g.BroadcastClientCommand(cmd)
+	}
+	return g.SendServerCommand(clientID, cmd)
 }
 
 // ========================

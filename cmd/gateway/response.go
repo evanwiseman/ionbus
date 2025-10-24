@@ -8,13 +8,13 @@ import (
 )
 
 func (g *Gateway) Gateway2ServerResponse(res models.Response) error {
-	key := pubsub.GetGatewayResponseRK(g.Cfg.ID, "#")
+	key := pubsub.GetRMQGatewayCommandRK(g.Cfg.ID, "#")
 	log.Printf("Sending response to %s", key)
 	pubsub.PublishRMQ(
 		g.Ctx,
 		g.ResponseCh,
 		pubsub.RMQPubOpts{
-			Exchange: pubsub.GetServerResponseTopicX(),
+			Exchange: pubsub.GetRMQServerResponseTopicX(),
 			Key:      key,
 		},
 		models.ContentJSON,

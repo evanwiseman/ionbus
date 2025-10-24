@@ -20,7 +20,7 @@ func (s *Server) SendGatewayCommand(gatewayID string, command models.Command) er
 		s.Ctx,
 		s.CommandCh,
 		pubsub.RMQPubOpts{
-			Exchange: pubsub.GetGatewayCommandTopicX(),
+			Exchange: pubsub.GetRMQGatewayCommandTopicX(),
 			Key:      key,
 		},
 		models.ContentJSON,
@@ -38,7 +38,7 @@ func (s *Server) BroadcastGatewayCommand(command models.Command) error {
 		s.Ctx,
 		s.CommandCh,
 		pubsub.RMQPubOpts{
-			Exchange: pubsub.GetGatewayCommandBroadcastX(),
+			Exchange: pubsub.GetRMQGatewayCommandBroadcastX(),
 			Key:      "", // ignored for fanout
 		},
 		models.ContentJSON,
@@ -80,6 +80,7 @@ func (s *Server) RequestGatewayIdentifiers(
 // ========================
 
 func (s *Server) HandlerServerCommands(command models.Command) pubsub.AckType {
+	log.Println("here")
 	switch command.Name {
 	case "request":
 		// handle request

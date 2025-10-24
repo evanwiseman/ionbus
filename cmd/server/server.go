@@ -20,7 +20,7 @@ type Server struct {
 	Ctx        context.Context
 	Cfg        *ServerConfig
 	DB         *sql.DB
-	Conn       *amqp.Connection
+	RMQConn    *amqp.Connection
 	CommandCh  *amqp.Channel
 	DeadCh     *amqp.Channel
 	PublishCh  *amqp.Channel
@@ -40,10 +40,10 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	}
 
 	server := &Server{
-		Ctx:  ctx,
-		Cfg:  cfg,
-		DB:   db,
-		Conn: conn,
+		Ctx:     ctx,
+		Cfg:     cfg,
+		DB:      db,
+		RMQConn: conn,
 	}
 
 	// Setup infrastructure
@@ -75,8 +75,8 @@ func (s *Server) Close() {
 	if s.ResponseCh != nil {
 		s.ResponseCh.Close()
 	}
-	if s.Conn != nil {
-		s.Conn.Close()
+	if s.RMQConn != nil {
+		s.RMQConn.Close()
 	}
 	if s.DB != nil {
 		s.DB.Close()
@@ -89,7 +89,7 @@ func (s *Server) Close() {
 
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (s *Server) setupRabbitMQ() error {
-	deadCh, err := pubsub.OpenChannel(s.Conn)
+	deadCh, err := pubsub.OpenChannel(s.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,7 @@ func (s *Server) setupRabbitMQ() error {
 		return err
 	}
 
-	pubCh, err := pubsub.OpenChannel(s.Conn)
+	pubCh, err := pubsub.OpenChannel(s.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (s *Server) setupRabbitMQ() error {
 }
 
 func (s *Server) setupCommands() error {
-	ch, err := pubsub.OpenChannel(s.Conn)
+	ch, err := pubsub.OpenChannel(s.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (s *Server) setupCommands() error {
 	}
 
 	// Queue Parameters
-	name := pubsub.GetServerCommandQ(s.Cfg.ID)
+	name := pubsub.GetRMQServerCommandQ(s.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -154,14 +154,14 @@ func (s *Server) setupCommands() error {
 	}
 
 	// Bind queue to topic exchange
-	key := pubsub.GetServerCommandRK(s.Cfg.ID, "#")
-	topicX := pubsub.GetServerCommandTopicX()
+	key := pubsub.GetRMQServerCommandRK(s.Cfg.ID, "#")
+	topicX := pubsub.GetRMQServerCommandTopicX()
 	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
 		return err
 	}
 
 	// Bind queue to broadcast exchange
-	broadcastX := pubsub.GetServerCommandBroadcastX()
+	broadcastX := pubsub.GetRMQServerCommandBroadcastX()
 	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func (s *Server) setupCommands() error {
 
 func (s *Server) setupResponses() error {
 	// Create the response channel
-	ch, err := pubsub.OpenChannel(s.Conn)
+	ch, err := pubsub.OpenChannel(s.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (s *Server) setupResponses() error {
 	}
 
 	// Queue parameters
-	name := pubsub.GetServerResponseQ(s.Cfg.ID)
+	name := pubsub.GetRMQServerResponseQ(s.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -214,8 +214,8 @@ func (s *Server) setupResponses() error {
 	}
 
 	// Bind Queue to gateway responses
-	key := pubsub.GetGatewayResponseRK("*", "#")
-	topicX := pubsub.GetServerResponseTopicX()
+	key := pubsub.GetRMQGatewayCommandRK("*", "#")
+	topicX := pubsub.GetRMQServerResponseTopicX()
 	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
 		return err
 	}

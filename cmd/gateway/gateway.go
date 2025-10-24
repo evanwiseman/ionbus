@@ -14,8 +14,8 @@ import (
 type Gateway struct {
 	Ctx        context.Context
 	Cfg        *GatewayConfig
-	Client     mqtt.Client
-	Conn       *amqp.Connection
+	MQTTClient mqtt.Client
+	RMQConn    *amqp.Connection
 	CommandCh  *amqp.Channel
 	DeadCh     *amqp.Channel
 	PublishCh  *amqp.Channel
@@ -44,10 +44,10 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 	}
 
 	gateway := &Gateway{
-		Ctx:    ctx,
-		Cfg:    cfg,
-		Client: client,
-		Conn:   conn,
+		Ctx:        ctx,
+		Cfg:        cfg,
+		MQTTClient: client,
+		RMQConn:    conn,
 	}
 
 	// Setup infrastructure
@@ -64,13 +64,13 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 
 func (g *Gateway) Start() error {
 	g.RequestServerIdentifiers("*", nil, "device initialization")
-
+	g.RequestClientIdentifiers("+", nil, "device initialization")
 	return nil
 }
 
 func (g *Gateway) Close() {
-	if g.Client != nil {
-		g.Client.Disconnect(250)
+	if g.MQTTClient != nil {
+		g.MQTTClient.Disconnect(250)
 	}
 	if g.CommandCh != nil {
 		g.CommandCh.Close()
@@ -84,20 +84,61 @@ func (g *Gateway) Close() {
 	if g.ResponseCh != nil {
 		g.ResponseCh.Close()
 	}
-	if g.Conn != nil {
-		g.Conn.Close()
+	if g.RMQConn != nil {
+		g.RMQConn.Close()
 	}
 }
 
 func (g *Gateway) setupMQTT() error {
-	// TODO
+	g.setupMQTTResponses()
+	return nil
+}
+
+func (g *Gateway) setupMQTTResponses() error {
+	topic := pubsub.GetMQTTGatewayResponseTopic(g.Cfg.ID, "#")
+	qos := byte(1)
+	err := pubsub.SubscribeMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: topic,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		func(msg any) {
+			log.Println(msg)
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	broadcast := pubsub.GetMQTTGatewayResponseBroadcast("#")
+	err = pubsub.SubscribeMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: broadcast,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		func(msg any) {
+			log.Println(msg)
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (g *Gateway) setupRMQ() error {
 	// Setup dead lettering
-	deadCh, err := pubsub.OpenChannel(g.Conn)
+	deadCh, err := pubsub.OpenChannel(g.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -110,18 +151,18 @@ func (g *Gateway) setupRMQ() error {
 	}
 
 	// Setup publisher channel
-	pubCh, err := pubsub.OpenChannel(g.Conn)
+	pubCh, err := pubsub.OpenChannel(g.RMQConn)
 	if err != nil {
 		return err
 	}
 	g.PublishCh = pubCh
 
 	// Setup commands for gateway from the server
-	if err := g.setupCommands(); err != nil {
+	if err := g.setupRMQCommands(); err != nil {
 		return fmt.Errorf("failed to setup commands: %w", err)
 	}
 
-	if err := g.setupResponses(); err != nil {
+	if err := g.setupRMQResponses(); err != nil {
 		return fmt.Errorf("failed to setup responses: %w", err)
 	}
 
@@ -129,9 +170,9 @@ func (g *Gateway) setupRMQ() error {
 }
 
 // Creates a commands queue to listen for server commands
-func (g *Gateway) setupCommands() error {
+func (g *Gateway) setupRMQCommands() error {
 	// Declare Exchanges
-	ch, err := pubsub.OpenChannel(g.Conn)
+	ch, err := pubsub.OpenChannel(g.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -144,7 +185,7 @@ func (g *Gateway) setupCommands() error {
 	}
 
 	// Queue Parameters
-	name := pubsub.GetGatewayCommandQ(g.Cfg.ID)
+	name := pubsub.GetRMQGatewayCommandQ(g.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -162,14 +203,14 @@ func (g *Gateway) setupCommands() error {
 	}
 
 	// Bind queue to gateway topic exchange
-	key := pubsub.GetGatewayCommandRK(g.Cfg.ID, "#")
-	topicX := pubsub.GetGatewayCommandTopicX()
+	key := pubsub.GetRMQGatewayCommandRK(g.Cfg.ID, "#")
+	topicX := pubsub.GetRMQGatewayCommandTopicX()
 	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
 		return err
 	}
 
 	// Bind queue to broadcast exchange
-	broadcastX := pubsub.GetGatewayCommandBroadcastX()
+	broadcastX := pubsub.GetRMQGatewayCommandBroadcastX()
 	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
 		return err
 	}
@@ -191,8 +232,8 @@ func (g *Gateway) setupCommands() error {
 }
 
 // Creates a channel to send responses on
-func (g *Gateway) setupResponses() error {
-	ch, err := pubsub.OpenChannel(g.Conn)
+func (g *Gateway) setupRMQResponses() error {
+	ch, err := pubsub.OpenChannel(g.RMQConn)
 	if err != nil {
 		return err
 	}
@@ -202,7 +243,7 @@ func (g *Gateway) setupResponses() error {
 		return err
 	}
 
-	name := pubsub.GetGatewayResponseQ(g.Cfg.ID)
+	name := pubsub.GetRMQGatewayResponseQ(g.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -220,8 +261,8 @@ func (g *Gateway) setupResponses() error {
 	}
 
 	// Bind to Queue to server responses key
-	key := pubsub.GetServerResponseRK("*", "#")
-	topicX := pubsub.GetGatewayResponseTopicX()
+	key := pubsub.GetRMQServerResponseRK("*", "#")
+	topicX := pubsub.GetRMQGatewayResponseTopicX()
 	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
 		return err
 	}

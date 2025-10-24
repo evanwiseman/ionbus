@@ -33,7 +33,7 @@ func PublishMQTT[T any](
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	log.Printf("Publishing MQTT message %v...\n", val)
+	log.Printf("Publishing MQTT message %v to %s...", val, opts.Topic)
 	token := client.Publish(opts.Topic, opts.QoS, opts.Retained, payload)
 
 	// Wait or cancel via context
@@ -60,8 +60,9 @@ func SubscribeMQTT[T any](
 	client mqtt.Client,
 	opts MQTTSubOpts,
 	contentType models.ContentType,
-	handler func(T) AckType, // for consistency with rmq
+	handler func(T), // for consistency with rmq
 ) error {
+	log.Printf("Subscribing to MQTT topic %s...", opts.Topic)
 	token := client.Subscribe(opts.Topic, opts.QoS, func(client mqtt.Client, msg mqtt.Message) {
 		var obj T
 
@@ -69,7 +70,7 @@ func SubscribeMQTT[T any](
 			log.Printf("Failed to unmarhsal message: %v\n", err)
 		}
 
-		_ = handler(obj) // Ignore ack type, paho handles it
+		handler(obj) // Ignore ack type, paho handles it
 	})
 
 	// Wait for subscription acknowledgment with a timeout

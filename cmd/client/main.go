@@ -7,12 +7,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/joho/godotenv"
 )
 
 func cleanup() {
-
+	log.Println("Stopping ionbus client...")
 }
 
 func main() {
@@ -40,36 +39,28 @@ func run(ctx context.Context) {
 	log.Println("Starting ionbus client...")
 
 	// Load from .env update
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+	if err := godotenv.Load("./cmd/client/.env"); err != nil {
+		log.Fatalf("Failed to load .env: %v", err)
 	}
 	cfg, err := LoadClientConfig()
 	if err != nil {
-		log.Fatalf("Failed to get server config: %v\n", err)
+		log.Fatalf("Failed to load cilent config: %v", err)
 	}
 
-	// ========================
-	// Start MQTT
-	// ========================
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(cfg.MQTT.GetUrl())
-	opts.SetKeepAlive(cfg.MQTT.KeepAlive)
-	opts.SetCleanSession(cfg.MQTT.CleanSession)
-	opts.SetClientID(cfg.ID)
-	opts.SetUsername(cfg.MQTT.Username)
-	opts.SetPassword(cfg.MQTT.Password)
-
-	mqttClient := mqtt.NewClient(opts)
-	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
-		log.Fatalf("Failed to connect to MQTT: %v\n", token.Error())
+	// Create a new client
+	client, err := NewClient(ctx, cfg)
+	if err != nil {
+		log.Fatalf("failed to create new client: %v", err)
 	}
-	defer mqttClient.Disconnect(250)
-	log.Println("Successfully connected to MQTT")
+	defer client.Close()
 
-	// ========================
+	// Start the client
+	if err := client.Start(); err != nil {
+		log.Fatalf("failed to start client: %v", err)
+	}
+	log.Println("Successfully started ionbus client")
+
 	// Wait for cancellation
-	// ========================
 	<-ctx.Done()
 	log.Println("Context cancelled, shutting down gracefully...")
 }

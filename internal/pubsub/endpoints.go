@@ -4,12 +4,14 @@ import "fmt"
 
 // Queue names
 const (
-	CommandPrefix  = "command"
-	RequestPrefix  = "request"
-	ResponsePrefix = "response"
-	GatewayPrefix  = "gateway"
-	ServerPrefix   = "server"
-	QIonbusDlq     = "ionbus.dlq"
+	BroadcastPrefix = "broadcast"
+	CommandPrefix   = "command"
+	RequestPrefix   = "request"
+	ResponsePrefix  = "response"
+	ClientPrefix    = "client"
+	GatewayPrefix   = "gateway"
+	ServerPrefix    = "server"
+	QIonbusDlq      = "ionbus.dlq"
 )
 
 // Exchange names
@@ -18,22 +20,37 @@ const (
 )
 
 // ========================
+// Client Command
+// ========================
+func GetMQTTClientCommandTopic(clientID, action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", ClientPrefix, clientID, CommandPrefix, action)
+}
+
+func GetMQTTClientCommandBroadcast(action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, ClientPrefix, CommandPrefix, action)
+}
+
+func GetMQTTClientResponseTopic(clientID, action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", ClientPrefix, clientID, ResponsePrefix, action)
+}
+
+// ========================
 // Gateway Command
 // ========================
 
-func GetGatewayCommandTopicX() string {
+func GetRMQGatewayCommandTopicX() string {
 	return fmt.Sprintf("%s.%s.topic", GatewayPrefix, CommandPrefix)
 }
 
-func GetGatewayCommandBroadcastX() string {
+func GetRMQGatewayCommandBroadcastX() string {
 	return fmt.Sprintf("%s.%s.broadcast", GatewayPrefix, CommandPrefix)
 }
 
-func GetGatewayCommandQ(gatewayID string) string {
+func GetRMQGatewayCommandQ(gatewayID string) string {
 	return fmt.Sprintf("%s.%s", gatewayID, CommandPrefix)
 }
 
-func GetGatewayCommandRK(gatewayID, action string) string {
+func GetRMQGatewayCommandRK(gatewayID, action string) string {
 	return fmt.Sprintf("%s.%s.%s.%s", GatewayPrefix, gatewayID, CommandPrefix, action)
 }
 
@@ -41,19 +58,19 @@ func GetGatewayCommandRK(gatewayID, action string) string {
 // Server Command
 // ========================
 
-func GetServerCommandTopicX() string {
+func GetRMQServerCommandTopicX() string {
 	return fmt.Sprintf("%s.%s.topic", ServerPrefix, CommandPrefix)
 }
 
-func GetServerCommandBroadcastX() string {
+func GetRMQServerCommandBroadcastX() string {
 	return fmt.Sprintf("%s.%s.broadcast", ServerPrefix, CommandPrefix)
 }
 
-func GetServerCommandQ(serverID string) string {
+func GetRMQServerCommandQ(serverID string) string {
 	return fmt.Sprintf("%s.%s", serverID, CommandPrefix)
 }
 
-func GetServerCommandRK(serverID, action string) string {
+func GetRMQServerCommandRK(serverID, action string) string {
 	return fmt.Sprintf("%s.%s.%s.%s", ServerPrefix, serverID, CommandPrefix, action)
 }
 
@@ -61,31 +78,39 @@ func GetServerCommandRK(serverID, action string) string {
 // Gateway Response
 // ========================
 
-func GetGatewayResponseTopicX() string {
+func GetRMQGatewayResponseTopicX() string {
 	return fmt.Sprintf("%s.%s.topic", GatewayPrefix, ResponsePrefix)
 }
 
-func GetGatewayResponseQ(gatewayID string) string {
+func GetRMQGatewayResponseQ(gatewayID string) string {
 	return fmt.Sprintf("%s.%s", gatewayID, ResponsePrefix)
 }
 
 // The routing key the gateway posts to, the server listens to gatewayID='*'
-func GetGatewayResponseRK(gatewayID, action string) string {
+func GetRMQGatewayResponseRKK(gatewayID, action string) string {
 	return fmt.Sprintf("%s.%s.%s.%s", GatewayPrefix, gatewayID, ResponsePrefix, action)
+}
+
+func GetMQTTGatewayResponseTopic(gatewayID, action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", GatewayPrefix, gatewayID, ResponsePrefix, action)
+}
+
+func GetMQTTGatewayResponseBroadcast(action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, GatewayPrefix, ResponsePrefix, action)
 }
 
 // ========================
 // Server Response
 // ========================
 
-func GetServerResponseTopicX() string {
+func GetRMQServerResponseTopicX() string {
 	return fmt.Sprintf("%s.%s.topic", ServerPrefix, ResponsePrefix)
 }
 
-func GetServerResponseQ(serverID string) string {
+func GetRMQServerResponseQ(serverID string) string {
 	return fmt.Sprintf("%s.%s", serverID, ResponsePrefix)
 }
 
-func GetServerResponseRK(serverID, action string) string {
+func GetRMQServerResponseRK(serverID, action string) string {
 	return fmt.Sprintf("%s.%s.%s.%s", ServerPrefix, serverID, ResponsePrefix, action)
 }

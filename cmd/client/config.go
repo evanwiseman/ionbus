@@ -11,14 +11,14 @@ type ClientConfig struct {
 	MQTT config.MQTTConfig
 }
 
-func LoadClientConfig() (ClientConfig, error) {
+func LoadClientConfig() (*ClientConfig, error) {
 	id := os.Getenv("CLIENT_ID")
 	mqttConfig, err := config.LoadMQTTConfig()
 	if err != nil {
-		return ClientConfig{}, err
+		return nil, err
 	}
 
-	return ClientConfig{
+	return &ClientConfig{
 		ID:   id,
 		MQTT: mqttConfig,
 	}, nil
