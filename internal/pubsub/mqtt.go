@@ -33,7 +33,6 @@ func PublishMQTT[T any](
 		return fmt.Errorf("failed to marshal content: %w", err)
 	}
 
-	log.Printf("Publishing MQTT message %v to %s...", val, opts.Topic)
 	token := client.Publish(opts.Topic, opts.QoS, opts.Retained, payload)
 
 	// Wait or cancel via context
@@ -62,7 +61,6 @@ func SubscribeMQTT[T any](
 	contentType models.ContentType,
 	handler func(T), // for consistency with rmq
 ) error {
-	log.Printf("Subscribing to MQTT topic %s...", opts.Topic)
 	token := client.Subscribe(opts.Topic, opts.QoS, func(client mqtt.Client, msg mqtt.Message) {
 		var obj T
 

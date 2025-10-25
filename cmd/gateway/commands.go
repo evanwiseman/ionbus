@@ -98,7 +98,8 @@ func (g *Gateway) RequestServerIdentifiers(
 	reason string,
 ) error {
 	cmd := models.Command{
-		Name: "request",
+		Name:   "request",
+		Sender: g.Cfg.ID,
 		Args: models.RequestArgs{
 			Filters:   filters,
 			Timestamp: time.Now(),
@@ -117,7 +118,8 @@ func (g *Gateway) RequestClientIdentifiers(
 	reason string,
 ) error {
 	cmd := models.Command{
-		Name: "request",
+		Name:   "request",
+		Sender: g.Cfg.ID,
 		Args: models.RequestArgs{
 			Filters:   filters,
 			Timestamp: time.Now(),
@@ -127,14 +129,21 @@ func (g *Gateway) RequestClientIdentifiers(
 	if clientID == "+" || clientID == "" {
 		return g.BroadcastClientCommand(cmd)
 	}
-	return g.SendServerCommand(clientID, cmd)
+	return g.SendClientCommand(clientID, cmd)
 }
 
 // ========================
 // Handlers
 // ========================
 
-func (g *Gateway) HandlerGatewayCommands(command models.Command) pubsub.AckType {
+func (g *Gateway) HandlerMQTTGatewayCommands(command models.Command) {
+	switch command.Name {
+	case "request":
+		// handle request
+	}
+}
+
+func (g *Gateway) HandlerRMQGatewayCommands(command models.Command) pubsub.AckType {
 	switch command.Name {
 	case "request":
 		// handle request

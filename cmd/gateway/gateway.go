@@ -90,7 +90,43 @@ func (g *Gateway) Close() {
 }
 
 func (g *Gateway) setupMQTT() error {
+	g.setupMQTTCommands()
 	g.setupMQTTResponses()
+	return nil
+}
+
+func (g *Gateway) setupMQTTCommands() error {
+	topic := pubsub.GetMQTTGatewayCommandTopic(g.Cfg.ID, "#")
+	qos := byte(1)
+	err := pubsub.SubscribeMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: topic,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		g.HandlerMQTTGatewayCommands,
+	)
+	if err != nil {
+		return err
+	}
+
+	broadcast := pubsub.GetMQTTGatewayCommandBroadcast("#")
+	err = pubsub.SubscribeMQTT(
+		g.Ctx,
+		g.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: broadcast,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		g.HandlerMQTTGatewayCommands,
+	)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -223,7 +259,7 @@ func (g *Gateway) setupRMQCommands() error {
 			QueueName: name,
 		},
 		models.ContentJSON,
-		g.HandlerGatewayCommands,
+		g.HandlerRMQGatewayCommands,
 	); err != nil {
 		return err
 	}

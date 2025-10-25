@@ -62,7 +62,8 @@ func (s *Server) RequestGatewayIdentifiers(
 	reason string,
 ) error {
 	cmd := models.Command{
-		Name: "request",
+		Name:   "request",
+		Sender: s.Cfg.ID,
 		Args: models.RequestArgs{
 			Filters:   filters,
 			Timestamp: time.Now(),

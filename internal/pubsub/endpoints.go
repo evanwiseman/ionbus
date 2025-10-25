@@ -20,7 +20,7 @@ const (
 )
 
 // ========================
-// Client Command
+// Client
 // ========================
 func GetMQTTClientCommandTopic(clientID, action string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", ClientPrefix, clientID, CommandPrefix, action)
@@ -34,9 +34,21 @@ func GetMQTTClientResponseTopic(clientID, action string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", ClientPrefix, clientID, ResponsePrefix, action)
 }
 
+func GetMQTTClientResponseBroadcast(action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, ClientPrefix, ResponsePrefix, action)
+}
+
 // ========================
 // Gateway Command
 // ========================
+
+func GetMQTTGatewayCommandTopic(gatewayID, action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", GatewayPrefix, gatewayID, CommandPrefix, action)
+}
+
+func GetMQTTGatewayCommandBroadcast(action string) string {
+	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, ClientPrefix, CommandPrefix, action)
+}
 
 func GetRMQGatewayCommandTopicX() string {
 	return fmt.Sprintf("%s.%s.topic", GatewayPrefix, CommandPrefix)

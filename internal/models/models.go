@@ -3,8 +3,9 @@ package models
 import "time"
 
 type Command struct {
-	Name string      `json:"name"`
-	Args interface{} `json:"args"`
+	Name   string      `json:"name"`
+	Sender string      `json:"sender"`
+	Args   interface{} `json:"args"`
 }
 
 type TargetType string

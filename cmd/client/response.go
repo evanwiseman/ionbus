@@ -7,8 +7,13 @@ import (
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
-func (c *Client) Client2GatewayResponse(res models.Response) error {
-	topic := pubsub.GetMQTTGatewayResponseBroadcast("")
+func (c *Client) Client2GatewayResponse(target string, res models.Response) error {
+	var topic string
+	if target == "" {
+		topic = pubsub.GetMQTTGatewayResponseBroadcast("")
+	} else {
+		topic = pubsub.GetMQTTGatewayResponseTopic(target, "")
+	}
 	log.Println(topic)
 	pubsub.PublishMQTT(
 		c.Ctx,

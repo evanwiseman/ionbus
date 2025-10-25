@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
@@ -45,7 +46,7 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 }
 
 func (c *Client) Start() error {
-	// TODO: Start client logic
+	c.RequestGatewayIdentifiers("", nil, "device initialization")
 	return nil
 }
 
@@ -58,6 +59,10 @@ func (c *Client) Close() {
 func (c *Client) setupMQTT() error {
 	if err := c.setupCommands(); err != nil {
 		return fmt.Errorf("failed to setup commands: %w", err)
+	}
+
+	if err := c.setupResponses(); err != nil {
+		return fmt.Errorf("failed to setup response: %w", err)
 	}
 
 	return nil
@@ -91,6 +96,46 @@ func (c *Client) setupCommands() error {
 		},
 		models.ContentJSON,
 		c.HandlerClientCommands,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) setupResponses() error {
+	topic := pubsub.GetMQTTClientResponseTopic(c.Cfg.ID, "#")
+	qos := byte(1)
+
+	err := pubsub.SubscribeMQTT(
+		c.Ctx,
+		c.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: topic,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		func(msg any) {
+			log.Println(msg)
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	broadcast := pubsub.GetMQTTClientCommandBroadcast("#")
+	err = pubsub.SubscribeMQTT(
+		c.Ctx,
+		c.MQTTClient,
+		pubsub.MQTTSubOpts{
+			Topic: broadcast,
+			QoS:   qos,
+		},
+		models.ContentJSON,
+		func(msg any) {
+			log.Println(msg)
+		},
 	)
 	if err != nil {
 		return err
