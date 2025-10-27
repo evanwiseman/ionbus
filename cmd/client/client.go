@@ -3,17 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
+type ClientMQTT struct {
+	Client       mqtt.Client
+	RequestFlow  *pubsub.MQTTFlow
+	ResponseFlow *pubsub.MQTTFlow
+}
+
 type Client struct {
-	Ctx        context.Context
-	Cfg        ClientConfig
-	MQTTClient mqtt.Client
+	Ctx  context.Context
+	Cfg  ClientConfig
+	MQTT ClientMQTT
 }
 
 func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
@@ -32,9 +36,11 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 	}
 
 	client := &Client{
-		Ctx:        ctx,
-		Cfg:        *cfg,
-		MQTTClient: mqttClient,
+		Ctx: ctx,
+		Cfg: *cfg,
+		MQTT: ClientMQTT{
+			Client: mqttClient,
+		},
 	}
 
 	// Setup Infrastructure
@@ -46,18 +52,18 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 }
 
 func (c *Client) Start() error {
-	c.RequestGatewayIdentifiers("", nil, "device initialization")
+	// c.RequestGatewayIdentifiers("", nil, "device initialization")
 	return nil
 }
 
 func (c *Client) Close() {
-	if c.MQTTClient != nil {
-		c.MQTTClient.Disconnect(250)
+	if c.MQTT.Client != nil {
+		c.MQTT.Client.Disconnect(250)
 	}
 }
 
 func (c *Client) setupMQTT() error {
-	if err := c.setupCommands(); err != nil {
+	if err := c.setupRequests(); err != nil {
 		return fmt.Errorf("failed to setup commands: %w", err)
 	}
 
@@ -68,36 +74,24 @@ func (c *Client) setupMQTT() error {
 	return nil
 }
 
-func (c *Client) setupCommands() error {
-	topic := pubsub.GetMQTTClientCommandTopic(c.Cfg.ID, "#")
+func (c *Client) setupRequests() error {
+	topic := pubsub.MClientReqT(c.Cfg.ID, "#")
 	qos := byte(1)
 
-	err := pubsub.SubscribeMQTT(
-		c.Ctx,
-		c.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: topic,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		c.HandlerClientCommands,
-	)
-	if err != nil {
+	requestFlow := pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
+	c.MQTT.RequestFlow = requestFlow
+	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: topic,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.GetMQTTClientCommandBroadcast("#")
-	err = pubsub.SubscribeMQTT(
-		c.Ctx,
-		c.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: broadcast,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		c.HandlerClientCommands,
-	)
-	if err != nil {
+	broadcast := pubsub.MClientReqB("#")
+	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: broadcast,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 
@@ -105,39 +99,23 @@ func (c *Client) setupCommands() error {
 }
 
 func (c *Client) setupResponses() error {
-	topic := pubsub.GetMQTTClientResponseTopic(c.Cfg.ID, "#")
+	topic := pubsub.MClientResT(c.Cfg.ID, "#")
 	qos := byte(1)
 
-	err := pubsub.SubscribeMQTT(
-		c.Ctx,
-		c.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: topic,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		func(msg any) {
-			log.Println(msg)
-		},
-	)
-	if err != nil {
+	responseFlow := pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
+	c.MQTT.ResponseFlow = responseFlow
+	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: topic,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.GetMQTTClientCommandBroadcast("#")
-	err = pubsub.SubscribeMQTT(
-		c.Ctx,
-		c.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: broadcast,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		func(msg any) {
-			log.Println(msg)
-		},
-	)
-	if err != nil {
+	broadcast := pubsub.MClientReqB("#")
+	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: broadcast,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 

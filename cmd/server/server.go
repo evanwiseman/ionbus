@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
@@ -16,15 +15,18 @@ import (
 // Server
 // ========================
 
+type ServerRMQ struct {
+	Conn         *amqp.Connection
+	DeadCh       *amqp.Channel
+	RequestFlow  *pubsub.RMQFlow
+	ResponseFlow *pubsub.RMQFlow
+}
+
 type Server struct {
-	Ctx        context.Context
-	Cfg        *ServerConfig
-	DB         *sql.DB
-	RMQConn    *amqp.Connection
-	CommandCh  *amqp.Channel
-	DeadCh     *amqp.Channel
-	PublishCh  *amqp.Channel
-	ResponseCh *amqp.Channel
+	Ctx context.Context
+	Cfg *ServerConfig
+	DB  *sql.DB
+	RMQ ServerRMQ
 }
 
 // Create a new server from the config passed in
@@ -40,10 +42,12 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	}
 
 	server := &Server{
-		Ctx:     ctx,
-		Cfg:     cfg,
-		DB:      db,
-		RMQConn: conn,
+		Ctx: ctx,
+		Cfg: cfg,
+		DB:  db,
+		RMQ: ServerRMQ{
+			Conn: conn,
+		},
 	}
 
 	// Setup infrastructure
@@ -60,23 +64,17 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 // Start begins server operations
 func (s *Server) Start() error {
-	s.RequestGatewayIdentifiers("*", nil, "device initialization")
+	s.RequestGatewayIdentifiers("*")
 	return nil
 }
 
 // Close gracefully shuts down the server
 func (s *Server) Close() {
-	if s.DeadCh != nil {
-		s.DeadCh.Close()
+	if s.RMQ.DeadCh != nil {
+		s.RMQ.DeadCh.Close()
 	}
-	if s.CommandCh != nil {
-		s.CommandCh.Close()
-	}
-	if s.ResponseCh != nil {
-		s.ResponseCh.Close()
-	}
-	if s.RMQConn != nil {
-		s.RMQConn.Close()
+	if s.RMQ.Conn != nil {
+		s.RMQ.Conn.Close()
 	}
 	if s.DB != nil {
 		s.DB.Close()
@@ -89,11 +87,11 @@ func (s *Server) Close() {
 
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (s *Server) setupRabbitMQ() error {
-	deadCh, err := pubsub.OpenChannel(s.RMQConn)
+	deadCh, err := pubsub.OpenChannel(s.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	s.DeadCh = deadCh
+	s.RMQ.DeadCh = deadCh
 	if err := pubsub.DeclareDLX(deadCh); err != nil {
 		return err
 	}
@@ -101,18 +99,12 @@ func (s *Server) setupRabbitMQ() error {
 		return err
 	}
 
-	pubCh, err := pubsub.OpenChannel(s.RMQConn)
-	if err != nil {
-		return err
-	}
-	s.PublishCh = pubCh
-
-	// Setup Commands (Commands to the server sent from other devices, really only requests)
-	if err := s.setupCommands(); err != nil {
-		return fmt.Errorf("failed to setup command responses: %w", err)
+	// Setup Requests
+	if err := s.setupRequests(); err != nil {
+		return fmt.Errorf("failed to setup requests: %w", err)
 	}
 
-	// Setup Responses (Responses from other devices, that the server reads from)
+	// Setup Responses
 	if err := s.setupResponses(); err != nil {
 		return fmt.Errorf("failed to setup responses: %w", err)
 	}
@@ -120,23 +112,26 @@ func (s *Server) setupRabbitMQ() error {
 	return nil
 }
 
-func (s *Server) setupCommands() error {
-	ch, err := pubsub.OpenChannel(s.RMQConn)
+func (s *Server) setupRequests() error {
+	pubCh, err := pubsub.OpenChannel(s.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	s.CommandCh = ch
-
-	// Ensure the server has a command exchange
-	if err := pubsub.DeclareServerCommandTopicX(ch); err != nil {
+	subCh, err := pubsub.OpenChannel(s.RMQ.Conn)
+	if err != nil {
 		return err
 	}
-	if err := pubsub.DeclareServerCommandBroadcastX(ch); err != nil {
+
+	// Ensure the server has a request exchange
+	if err := pubsub.DeclareServerCommandTopicX(pubCh); err != nil {
+		return err
+	}
+	if err := pubsub.DeclareServerCommandBroadcastX(pubCh); err != nil {
 		return err
 	}
 
 	// Queue Parameters
-	name := pubsub.GetRMQServerCommandQ(s.Cfg.ID)
+	name := pubsub.RServerReqQ(s.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -147,56 +142,68 @@ func (s *Server) setupCommands() error {
 		},
 	}
 
-	// Declare the commands queue
-	_, err = pubsub.DeclareQueue(ch, name, opts)
+	// Declare the request queue
+	_, err = pubsub.DeclareQueue(subCh, name, opts)
 	if err != nil {
 		return err
 	}
 
 	// Bind queue to topic exchange
-	key := pubsub.GetRMQServerCommandRK(s.Cfg.ID, "#")
-	topicX := pubsub.GetRMQServerCommandTopicX()
-	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RServerReqTRK(s.Cfg.ID, "#"),
+		pubsub.RServerReqTX(),
+	); err != nil {
 		return err
 	}
 
 	// Bind queue to broadcast exchange
-	broadcastX := pubsub.GetRMQServerCommandBroadcastX()
-	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
-		return err
-	}
-
-	// Subscribe to server commands sent by gateway
-	if err := pubsub.SubscribeRMQ(
-		s.Ctx,
-		ch,
-		pubsub.RMQSubOpts{
-			QueueName: name,
-		},
-		models.ContentJSON,
-		s.HandlerServerCommands,
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RServerReqBRK("#"),
+		pubsub.RServerReqBX(),
 	); err != nil {
 		return err
 	}
+
+	// Subscribe to requests
+	s.RMQ.RequestFlow = pubsub.NewRMQFlow(s.Ctx, pubCh, subCh)
+	if err := s.RMQ.RequestFlow.Sub.Subscribe(pubsub.RMQSubOpts{QueueName: name}); err != nil {
+		return err
+	}
+
+	s.RMQ.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.RServerReqTRK(s.Cfg.ID, "#"),
+		s.HandleIdentifierRequest,
+	)
+	s.RMQ.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.RServerReqBRK("#"),
+		s.HandleIdentifierRequest,
+	)
 
 	return nil
 }
 
 func (s *Server) setupResponses() error {
 	// Create the response channel
-	ch, err := pubsub.OpenChannel(s.RMQConn)
+	pubCh, err := pubsub.OpenChannel(s.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	s.ResponseCh = ch
+	subCh, err := pubsub.OpenChannel(s.RMQ.Conn)
+	if err != nil {
+		return err
+	}
 
 	// Ensure the server has a response exchange
-	if err := pubsub.DeclareServerResponseTopicX(ch); err != nil {
+	if err := pubsub.DeclareServerResponseTopicX(subCh); err != nil {
 		return err
 	}
 
 	// Queue parameters
-	name := pubsub.GetRMQServerResponseQ(s.Cfg.ID)
+	name := pubsub.RServerResQ(s.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -208,33 +215,35 @@ func (s *Server) setupResponses() error {
 	}
 
 	// Declare the response queue
-	_, err = pubsub.DeclareQueue(ch, name, opts)
+	_, err = pubsub.DeclareQueue(subCh, name, opts)
 	if err != nil {
 		return err
 	}
 
 	// Bind Queue to gateway responses
-	key := pubsub.GetRMQGatewayCommandRK("*", "#")
-	topicX := pubsub.GetRMQServerResponseTopicX()
-	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RServerResTRK(s.Cfg.ID, "#"),
+		pubsub.RServerResTX(),
+	); err != nil {
 		return err
 	}
 
-	// Subscribe to responses published
-	if err := pubsub.SubscribeRMQ(
-		s.Ctx,
-		ch,
+	// Subscribe to responses
+	s.RMQ.ResponseFlow = pubsub.NewRMQFlow(s.Ctx, pubCh, subCh)
+	if err := s.RMQ.ResponseFlow.Sub.Subscribe(
 		pubsub.RMQSubOpts{
 			QueueName: name,
-		},
-		models.ContentJSON,
-		func(msg any) pubsub.AckType {
-			log.Println(msg)
-			return pubsub.Ack
 		},
 	); err != nil {
 		return err
 	}
+
+	s.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
+		pubsub.RServerResTRK(s.Cfg.ID, string(models.ActionGetIdentifiers)),
+		s.HandleIdentifierResponse,
+	)
 
 	return nil
 }

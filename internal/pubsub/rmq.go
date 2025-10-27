@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -28,52 +29,36 @@ type RMQSubOpts struct {
 	Args          amqp.Table
 }
 
-func PublishRMQ[T any](
-	ctx context.Context,
-	ch *amqp.Channel,
-	opts RMQPubOpts,
-	contentType models.ContentType,
-	val T,
-) error {
-	// Marshal val to JSON []byte
-	payload, err := models.Marshal(val, contentType)
-	if err != nil {
-		return fmt.Errorf("failed to marshal content: %w", err)
-	}
-
-	// Publish the message to the exchange
-	err = ch.PublishWithContext(
-		ctx,
-		opts.Exchange,
-		opts.Key,
-		opts.Mandatory,
-		opts.Immediate,
-		amqp.Publishing{
-			ContentType: string(contentType),
-			Body:        payload,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to publish message: %w", err)
-	}
-
-	return nil
+type RMQFlow struct {
+	Pub *RMQPublisher
+	Sub *RMQSubscriber
 }
 
-func SubscribeRMQ[T any](
-	ctx context.Context,
-	ch *amqp.Channel,
-	opts RMQSubOpts,
-	contentType models.ContentType,
-	handler func(T) AckType,
-) error {
+func NewRMQFlow(ctx context.Context, pubCh *amqp.Channel, subCh *amqp.Channel) *RMQFlow {
+	return &RMQFlow{
+		Pub: NewRMQPublisher(ctx, pubCh),
+		Sub: NewRMQSubscriber(ctx, subCh),
+	}
+}
+
+type RMQSubscriber struct {
+	Ctx context.Context
+	Ch  *amqp.Channel
+	Mux *MessageMux
+}
+
+func NewRMQSubscriber(ctx context.Context, ch *amqp.Channel) *RMQSubscriber {
+	return &RMQSubscriber{Ctx: ctx, Ch: ch, Mux: NewMessageMux(".")}
+}
+
+func (s *RMQSubscriber) Subscribe(opts RMQSubOpts) error {
 	// Limit prefetch so other servers can clean process queue
-	if err := ch.Qos(opts.PrefetchCount, opts.PrefetchSize, opts.QosGlobal); err != nil {
-		return fmt.Errorf("failed to set QoS: %w", err)
+	if err := s.Ch.Qos(opts.PrefetchCount, opts.PrefetchSize, opts.QosGlobal); err != nil {
+		return fmt.Errorf("failed to set qos: %w", err)
 	}
 
 	// Get a chan of deliveries by consuming message
-	msgs, err := ch.Consume(
+	msgs, err := s.Ch.Consume(
 		opts.QueueName,
 		opts.Consumer,
 		opts.AutoAck,
@@ -89,33 +74,62 @@ func SubscribeRMQ[T any](
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-s.Ctx.Done():
+				log.Printf("Context cancelled, stopping consumer for queue %s", opts.QueueName)
+				// Optionally: cancel the consumer on the channel
+				if err := s.Ch.Cancel(opts.Consumer, false); err != nil {
+					log.Printf("Failed to cancel consumer: %v", err)
+				}
 				return
-			case msg, ok := <-msgs:
+			case d, ok := <-msgs:
 				if !ok {
+					// Channel closed, exit
 					return
 				}
-
-				// Unmarshal message
-				var obj T
-				if err := models.Unmarshal(msg.Body, contentType, &obj); err != nil {
-					msg.Nack(false, false)
-					continue
-				}
-
-				// Send the object of T to the handler
-				ackType := handler(obj)
-				switch ackType {
-				case Ack:
-					msg.Ack(false)
-				case NackRequeue:
-					msg.Nack(false, true)
-				case NackDiscard:
-					msg.Nack(false, false)
+				topic := d.RoutingKey
+				err := s.Mux.Dispatch(models.Message{
+					Topic:   topic,
+					Payload: d.Body,
+					Source:  "rmq",
+				})
+				if err != nil {
+					log.Printf("Failed to dispatch: %v", err)
 				}
 			}
 		}
 	}()
+
+	return nil
+}
+
+type RMQPublisher struct {
+	Ctx context.Context
+	Ch  *amqp.Channel
+}
+
+func NewRMQPublisher(ctx context.Context, ch *amqp.Channel) *RMQPublisher {
+	return &RMQPublisher{Ctx: ctx, Ch: ch}
+}
+
+func (p *RMQPublisher) Publish(opts RMQPubOpts, contentType models.ContentType, val any) error {
+	payload, err := models.Marshal(val, contentType)
+	if err != nil {
+		return fmt.Errorf("failed to marshal content: %w", err)
+	}
+
+	if err := p.Ch.PublishWithContext(
+		p.Ctx,
+		opts.Exchange,
+		opts.Key,
+		opts.Mandatory,
+		opts.Immediate,
+		amqp.Publishing{
+			ContentType: string(contentType),
+			Body:        payload,
+		},
+	); err != nil {
+		return fmt.Errorf("failed to publish message: %w", err)
+	}
 
 	return nil
 }

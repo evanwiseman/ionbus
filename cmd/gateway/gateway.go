@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
@@ -11,15 +10,24 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+type GatewayMQTT struct {
+	Client       mqtt.Client
+	RequestFlow  *pubsub.MQTTFlow
+	ResponseFlow *pubsub.MQTTFlow
+}
+
+type GatewayRMQ struct {
+	Conn         *amqp.Connection
+	DeadCh       *amqp.Channel
+	RequestFlow  *pubsub.RMQFlow
+	ResponseFlow *pubsub.RMQFlow
+}
+
 type Gateway struct {
-	Ctx        context.Context
-	Cfg        *GatewayConfig
-	MQTTClient mqtt.Client
-	RMQConn    *amqp.Connection
-	CommandCh  *amqp.Channel
-	DeadCh     *amqp.Channel
-	PublishCh  *amqp.Channel
-	ResponseCh *amqp.Channel
+	Ctx  context.Context
+	Cfg  *GatewayConfig
+	MQTT *GatewayMQTT
+	RMQ  *GatewayRMQ
 }
 
 func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
@@ -44,10 +52,14 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 	}
 
 	gateway := &Gateway{
-		Ctx:        ctx,
-		Cfg:        cfg,
-		MQTTClient: client,
-		RMQConn:    conn,
+		Ctx: ctx,
+		Cfg: cfg,
+		MQTT: &GatewayMQTT{
+			Client: client,
+		},
+		RMQ: &GatewayRMQ{
+			Conn: conn,
+		},
 	}
 
 	// Setup infrastructure
@@ -63,67 +75,48 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 }
 
 func (g *Gateway) Start() error {
-	g.RequestServerIdentifiers("*", nil, "device initialization")
-	g.RequestClientIdentifiers("+", nil, "device initialization")
+	g.RequestServerIdentifiers("*")
+	// g.RequestClientIdentifiers("+", nil, "device initialization")
 	return nil
 }
 
 func (g *Gateway) Close() {
-	if g.MQTTClient != nil {
-		g.MQTTClient.Disconnect(250)
+	if g.MQTT.Client != nil {
+		g.MQTT.Client.Disconnect(250)
 	}
-	if g.CommandCh != nil {
-		g.CommandCh.Close()
+	if g.RMQ.DeadCh != nil {
+		g.RMQ.DeadCh.Close()
 	}
-	if g.DeadCh != nil {
-		g.DeadCh.Close()
-	}
-	if g.PublishCh != nil {
-		g.PublishCh.Close()
-	}
-	if g.ResponseCh != nil {
-		g.ResponseCh.Close()
-	}
-	if g.RMQConn != nil {
-		g.RMQConn.Close()
+
+	if g.RMQ.Conn != nil {
+		g.RMQ.Conn.Close()
 	}
 }
 
 func (g *Gateway) setupMQTT() error {
-	g.setupMQTTCommands()
+	g.setupMQTTRequests()
 	g.setupMQTTResponses()
 	return nil
 }
 
-func (g *Gateway) setupMQTTCommands() error {
-	topic := pubsub.GetMQTTGatewayCommandTopic(g.Cfg.ID, "#")
+func (g *Gateway) setupMQTTRequests() error {
+	topic := pubsub.MGatewayReqT(g.Cfg.ID, "#")
 	qos := byte(1)
-	err := pubsub.SubscribeMQTT(
-		g.Ctx,
-		g.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: topic,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		g.HandlerMQTTGatewayCommands,
-	)
-	if err != nil {
+
+	requestFlow := pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
+	g.MQTT.RequestFlow = requestFlow
+	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: topic,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.GetMQTTGatewayCommandBroadcast("#")
-	err = pubsub.SubscribeMQTT(
-		g.Ctx,
-		g.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: broadcast,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		g.HandlerMQTTGatewayCommands,
-	)
-	if err != nil {
+	broadcast := pubsub.MGatewayReqB("#")
+	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: broadcast,
+		QoS:   qos,
+	}); err != nil {
 		return err
 	}
 
@@ -131,41 +124,24 @@ func (g *Gateway) setupMQTTCommands() error {
 }
 
 func (g *Gateway) setupMQTTResponses() error {
-	topic := pubsub.GetMQTTGatewayResponseTopic(g.Cfg.ID, "#")
+	topic := pubsub.MGatewayResT(g.Cfg.ID, "#")
 	qos := byte(1)
-	err := pubsub.SubscribeMQTT(
-		g.Ctx,
-		g.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: topic,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		func(msg any) {
-			log.Println(msg)
-		},
-	)
 
-	if err != nil {
-		return err
+	responseFlow := pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
+	g.MQTT.ResponseFlow = responseFlow
+	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: topic,
+		QoS:   qos,
+	}); err != nil {
+		return nil
 	}
 
-	broadcast := pubsub.GetMQTTGatewayResponseBroadcast("#")
-	err = pubsub.SubscribeMQTT(
-		g.Ctx,
-		g.MQTTClient,
-		pubsub.MQTTSubOpts{
-			Topic: broadcast,
-			QoS:   qos,
-		},
-		models.ContentJSON,
-		func(msg any) {
-			log.Println(msg)
-		},
-	)
-
-	if err != nil {
-		return err
+	broadcast := pubsub.MGatewayResB("#")
+	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: broadcast,
+		QoS:   qos,
+	}); err != nil {
+		return nil
 	}
 
 	return nil
@@ -174,11 +150,11 @@ func (g *Gateway) setupMQTTResponses() error {
 // Setup RabbitMQ topic exchange and dead letter exchange
 func (g *Gateway) setupRMQ() error {
 	// Setup dead lettering
-	deadCh, err := pubsub.OpenChannel(g.RMQConn)
+	deadCh, err := pubsub.OpenChannel(g.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	g.DeadCh = deadCh
+	g.RMQ.DeadCh = deadCh
 	if err := pubsub.DeclareDLX(deadCh); err != nil {
 		return err
 	}
@@ -186,15 +162,8 @@ func (g *Gateway) setupRMQ() error {
 		return err
 	}
 
-	// Setup publisher channel
-	pubCh, err := pubsub.OpenChannel(g.RMQConn)
-	if err != nil {
-		return err
-	}
-	g.PublishCh = pubCh
-
 	// Setup commands for gateway from the server
-	if err := g.setupRMQCommands(); err != nil {
+	if err := g.setupRMQRequests(); err != nil {
 		return fmt.Errorf("failed to setup commands: %w", err)
 	}
 
@@ -206,22 +175,26 @@ func (g *Gateway) setupRMQ() error {
 }
 
 // Creates a commands queue to listen for server commands
-func (g *Gateway) setupRMQCommands() error {
-	// Declare Exchanges
-	ch, err := pubsub.OpenChannel(g.RMQConn)
+func (g *Gateway) setupRMQRequests() error {
+	pubCh, err := pubsub.OpenChannel(g.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	g.CommandCh = ch
-	if err := pubsub.DeclareGatewayCommandTopicX(ch); err != nil {
+	subCh, err := pubsub.OpenChannel(g.RMQ.Conn)
+	if err != nil {
 		return err
 	}
-	if err := pubsub.DeclareGatewayCommandBroadcastX(ch); err != nil {
+
+	// Declare Exchanges
+	if err := pubsub.DeclareGatewayCommandTopicX(subCh); err != nil {
+		return err
+	}
+	if err := pubsub.DeclareGatewayCommandBroadcastX(subCh); err != nil {
 		return err
 	}
 
 	// Queue Parameters
-	name := pubsub.GetRMQGatewayCommandQ(g.Cfg.ID)
+	name := pubsub.RGatewayReqQ(g.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -233,53 +206,66 @@ func (g *Gateway) setupRMQCommands() error {
 	}
 
 	// Declare the command queue
-	_, err = pubsub.DeclareQueue(ch, name, opts)
+	_, err = pubsub.DeclareQueue(subCh, name, opts)
 	if err != nil {
 		return err
 	}
 
 	// Bind queue to gateway topic exchange
-	key := pubsub.GetRMQGatewayCommandRK(g.Cfg.ID, "#")
-	topicX := pubsub.GetRMQGatewayCommandTopicX()
-	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RGatewayReqTRK(g.Cfg.ID, "#"),
+		pubsub.RGatewayReqTX(),
+	); err != nil {
 		return err
 	}
 
 	// Bind queue to broadcast exchange
-	broadcastX := pubsub.GetRMQGatewayCommandBroadcastX()
-	if err := pubsub.BindQueue(ch, name, "", broadcastX); err != nil {
-		return err
-	}
-
-	// Subscribe to gateway commands sent by server
-	if err := pubsub.SubscribeRMQ(
-		g.Ctx,
-		ch,
-		pubsub.RMQSubOpts{
-			QueueName: name,
-		},
-		models.ContentJSON,
-		g.HandlerRMQGatewayCommands,
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RGatewayReqBRK("#"),
+		pubsub.RGatewayReqBX(),
 	); err != nil {
 		return err
 	}
+
+	g.RMQ.RequestFlow = pubsub.NewRMQFlow(g.Ctx, pubCh, subCh)
+	if err := g.RMQ.RequestFlow.Sub.Subscribe(pubsub.RMQSubOpts{QueueName: name}); err != nil {
+		return err
+	}
+
+	g.RMQ.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.RGatewayReqTRK(g.Cfg.ID, string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierRequest,
+	)
+	g.RMQ.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.RGatewayReqBRK(string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierRequest,
+	)
 
 	return nil
 }
 
 // Creates a channel to send responses on
 func (g *Gateway) setupRMQResponses() error {
-	ch, err := pubsub.OpenChannel(g.RMQConn)
+	pubCh, err := pubsub.OpenChannel(g.RMQ.Conn)
 	if err != nil {
 		return err
 	}
-	g.ResponseCh = ch
-
-	if err := pubsub.DeclareGatewayResponseTopicX(ch); err != nil {
+	subCh, err := pubsub.OpenChannel(g.RMQ.Conn)
+	if err != nil {
 		return err
 	}
 
-	name := pubsub.GetRMQGatewayResponseQ(g.Cfg.ID)
+	// Declare the exchange
+	if err := pubsub.DeclareGatewayResponseTopicX(subCh); err != nil {
+		return err
+	}
+
+	// Queue parameters
+	name := pubsub.RGatewayResQ(g.Cfg.ID)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -291,33 +277,33 @@ func (g *Gateway) setupRMQResponses() error {
 	}
 
 	// Declare the Response Queue
-	_, err = pubsub.DeclareQueue(ch, name, opts)
+	_, err = pubsub.DeclareQueue(subCh, name, opts)
 	if err != nil {
 		return err
 	}
 
-	// Bind to Queue to server responses key
-	key := pubsub.GetRMQServerResponseRK("*", "#")
-	topicX := pubsub.GetRMQGatewayResponseTopicX()
-	if err := pubsub.BindQueue(ch, name, key, topicX); err != nil {
+	if err := pubsub.BindQueue(
+		subCh,
+		name,
+		pubsub.RGatewayResTRK(g.Cfg.ID, "#"),
+		pubsub.RGatewayResTX(),
+	); err != nil {
 		return err
 	}
 
-	// Subscribe to responses published
-	if err := pubsub.SubscribeRMQ(
-		g.Ctx,
-		ch,
+	g.RMQ.ResponseFlow = pubsub.NewRMQFlow(g.Ctx, pubCh, subCh)
+	if err := g.RMQ.ResponseFlow.Sub.Subscribe(
 		pubsub.RMQSubOpts{
 			QueueName: name,
-		},
-		models.ContentJSON,
-		func(msg any) pubsub.AckType {
-			log.Println(msg)
-			return pubsub.Ack
 		},
 	); err != nil {
 		return err
 	}
+
+	g.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
+		pubsub.RGatewayResTRK(g.Cfg.ID, string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierResponse,
+	)
 
 	return nil
 }

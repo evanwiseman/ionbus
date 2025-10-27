@@ -60,7 +60,7 @@ func DeclareGatewayCommandTopicX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQGatewayCommandTopicX(),
+		RGatewayReqTX(),
 		"topic",
 		true,
 		false,
@@ -79,7 +79,7 @@ func DeclareGatewayCommandBroadcastX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQGatewayCommandBroadcastX(),
+		RGatewayReqBX(),
 		"fanout",
 		true,
 		false,
@@ -98,7 +98,7 @@ func DeclareServerCommandTopicX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQServerCommandTopicX(),
+		RServerReqTX(),
 		"topic",
 		true,
 		false,
@@ -117,7 +117,7 @@ func DeclareServerCommandBroadcastX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQServerCommandBroadcastX(),
+		RServerReqBX(),
 		"fanout",
 		true,
 		false,
@@ -140,7 +140,7 @@ func DeclareGatewayResponseTopicX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQGatewayResponseTopicX(),
+		RGatewayResTX(),
 		"topic",
 		true,
 		false,
@@ -159,7 +159,7 @@ func DeclareServerResponseTopicX(
 	ch *amqp.Channel,
 ) error {
 	err := ch.ExchangeDeclare(
-		GetRMQServerResponseTopicX(),
+		RServerResTX(),
 		"topic",
 		true,
 		false,
