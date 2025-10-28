@@ -76,7 +76,7 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 
 func (g *Gateway) Start() error {
 	g.RequestServerIdentifiers("*")
-	// g.RequestClientIdentifiers("+", nil, "device initialization")
+	g.RequestClientIdentifiers("+")
 	return nil
 }
 
@@ -100,49 +100,47 @@ func (g *Gateway) setupMQTT() error {
 }
 
 func (g *Gateway) setupMQTTRequests() error {
-	topic := pubsub.MGatewayReqT(g.Cfg.ID, "#")
-	qos := byte(1)
-
-	requestFlow := pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
-	g.MQTT.RequestFlow = requestFlow
-	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: topic,
-		QoS:   qos,
+	g.MQTT.RequestFlow = pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
+	if err := g.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: pubsub.MGatewayReqT(g.Cfg.ID, "#"),
+		QoS:   byte(1),
 	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.MGatewayReqB("#")
-	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: broadcast,
-		QoS:   qos,
+	g.MQTT.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.MGatewayReqT(g.Cfg.ID, string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierRequest,
+	)
+
+	if err := g.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: pubsub.MGatewayReqB("#"),
+		QoS:   byte(1),
 	}); err != nil {
 		return err
 	}
+
+	g.MQTT.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.MGatewayReqB(string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierRequest,
+	)
 
 	return nil
 }
 
 func (g *Gateway) setupMQTTResponses() error {
-	topic := pubsub.MGatewayResT(g.Cfg.ID, "#")
-	qos := byte(1)
-
-	responseFlow := pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
-	g.MQTT.ResponseFlow = responseFlow
-	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: topic,
-		QoS:   qos,
+	g.MQTT.ResponseFlow = pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
+	if err := g.MQTT.ResponseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: pubsub.MGatewayResT(g.Cfg.ID, "#"),
+		QoS:   byte(1),
 	}); err != nil {
 		return nil
 	}
 
-	broadcast := pubsub.MGatewayResB("#")
-	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: broadcast,
-		QoS:   qos,
-	}); err != nil {
-		return nil
-	}
+	g.MQTT.ResponseFlow.Sub.Mux.HandleFunc(
+		pubsub.MGatewayResT(g.Cfg.ID, string(models.ActionGetIdentifiers)),
+		g.HandleIdentifierResponse,
+	)
 
 	return nil
 }

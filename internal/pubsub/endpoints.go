@@ -47,7 +47,7 @@ func MGatewayReqT(gatewayID, action string) string {
 
 // MQTT Request Broadcast
 func MGatewayReqB(action string) string {
-	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, ClientPrefix, RequestPrefix, action)
+	return fmt.Sprintf("%s/%s/%s/%s", BroadcastPrefix, GatewayPrefix, RequestPrefix, action)
 }
 
 // RabbitMQ Request Topic Exchange

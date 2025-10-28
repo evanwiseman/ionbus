@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
@@ -52,7 +53,7 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 }
 
 func (c *Client) Start() error {
-	// c.RequestGatewayIdentifiers("", nil, "device initialization")
+	c.RequestGatewayIdentifiers("+")
 	return nil
 }
 
@@ -75,49 +76,51 @@ func (c *Client) setupMQTT() error {
 }
 
 func (c *Client) setupRequests() error {
-	topic := pubsub.MClientReqT(c.Cfg.ID, "#")
-	qos := byte(1)
 
-	requestFlow := pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
-	c.MQTT.RequestFlow = requestFlow
-	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: topic,
-		QoS:   qos,
+	c.MQTT.RequestFlow = pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
+
+	if err := c.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: pubsub.MClientReqT(c.Cfg.ID, "#"),
+		QoS:   byte(1),
 	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.MClientReqB("#")
-	if err := requestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: broadcast,
-		QoS:   qos,
-	}); err != nil {
+	if err := c.MQTT.RequestFlow.Sub.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MClientReqB("#"),
+			QoS:   byte(1),
+		},
+	); err != nil {
 		return err
 	}
+
+	c.MQTT.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.MClientReqT(c.Cfg.ID, string(models.ActionGetIdentifiers)),
+		c.HandleIdentifierRequest,
+	)
+
+	c.MQTT.RequestFlow.Sub.Mux.HandleFunc(
+		pubsub.MClientReqB(string(models.ActionGetIdentifiers)),
+		c.HandleIdentifierRequest,
+	)
 
 	return nil
 }
 
 func (c *Client) setupResponses() error {
-	topic := pubsub.MClientResT(c.Cfg.ID, "#")
-	qos := byte(1)
-
-	responseFlow := pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
-	c.MQTT.ResponseFlow = responseFlow
-	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: topic,
-		QoS:   qos,
+	c.MQTT.ResponseFlow = pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
+	if err := c.MQTT.ResponseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
+		Topic: pubsub.MClientResT(c.Cfg.ID, "#"),
+		QoS:   byte(1),
 	}); err != nil {
 		return err
 	}
 
-	broadcast := pubsub.MClientReqB("#")
-	if err := responseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: broadcast,
-		QoS:   qos,
-	}); err != nil {
-		return err
-	}
+	c.MQTT.ResponseFlow.Sub.Mux.HandleFunc(
+		pubsub.MClientResT(c.Cfg.ID, string(models.ActionGetIdentifiers)),
+		c.HandleIdentifierResponse,
+	)
 
 	return nil
 }

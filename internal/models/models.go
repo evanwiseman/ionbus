@@ -11,6 +11,7 @@ const (
 type DeviceType string
 
 const (
+	DeviceClient  = "client"
 	DeviceGateway = "gateway"
 	DeviceServer  = "server"
 )
