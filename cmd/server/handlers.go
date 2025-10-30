@@ -1,50 +1,105 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/evanwiseman/ionbus/internal/models"
-	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
-func (s *Server) HandleIdentifierRequest(msg models.Message) {
-	var req models.Request
-	if err := models.Unmarshal(msg.Payload, models.ContentJSON, &req); err != nil {
-		log.Printf("Failed to unmarshal request: %v", err)
-		return
+func (s *Server) HandlerRequests(data []byte) error {
+	// Unmarshal the message envelope
+	var msg models.Message
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
-	switch req.SourceDevice {
-	case models.DeviceGateway:
-		res := models.Response{
-			ID:           req.ID,
-			TargetID:     req.SourceID,
-			TargetDevice: req.SourceDevice,
-			SourceID:     s.Cfg.ID,
-			SourceDevice: models.DeviceServer,
-			Action:       req.Action,
-			Timestamp:    time.Now(),
-			Body:         models.IdentifierBody{ID: s.Cfg.ID},
-		}
+	// Unmarshal the request payload
+	var req models.Request
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
 
-		key := pubsub.RGatewayResTRK(req.SourceID, string(models.ActionGetIdentifiers))
-		log.Printf("Sending response to %s", key)
-		if err := s.RMQ.ResponseFlow.Pub.Publish(
-			pubsub.RMQPubOpts{
-				Exchange: pubsub.RGatewayResTX(),
-				Key:      key,
-			},
-			models.ContentJSON,
-			res,
-		); err != nil {
-			log.Printf("Failed to send response: %v", err)
-		}
+	log.Printf(
+		"Received request: Method=%s, Source=%s (%s)",
+		req.Method, msg.SourceID, msg.SourceDevice)
+
+	// Route based on the method
+	switch models.Method(req.Method) {
+	case models.MethodGetIdentifiers:
+		return s.handleGetIdentifiers(msg, req)
 	default:
-		log.Printf("Unable to handle identifier request: unknown device")
+		log.Printf("Unknown method: %s", req.Method)
+		return nil // Don't error on unknown methods, just ignore
 	}
 }
 
-func (s *Server) HandleIdentifierResponse(msg models.Message) {
-	log.Print(msg)
+func (s *Server) handleGetIdentifiers(msg models.Message, req models.Request) error {
+	payload, err := json.Marshal(s.Cfg.ID)
+	if err != nil {
+		return fmt.Errorf("error: failed to marshal id: %w", err)
+	}
+
+	// Create response with server identifier
+	res := models.Response{
+		Method:       req.Method,
+		TargetID:     msg.SourceID, // Reply to the sender
+		TargetDevice: msg.SourceDevice,
+		Payload:      payload,
+	}
+
+	// Send the response
+	return s.SendGatewayResponse(res)
+}
+
+func (s *Server) HandlerResponses(data []byte) error {
+	// Unmarshal the message envelope
+	var msg models.Message
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return fmt.Errorf("failed to unmarshal message: %w", err)
+	}
+
+	// Unmarshal the response payload
+	var res models.Response
+	if err := json.Unmarshal(msg.Payload, &res); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	log.Printf(
+		"Received response: Method=%s, Source=%s (%s)",
+		res.Method, msg.SourceID, msg.SourceDevice,
+	)
+
+	// Route based on the method
+	switch models.Method(res.Method) {
+	case models.MethodGetIdentifiers:
+		return s.handleIdentifiersResponse(msg, res)
+	default:
+		log.Printf("Unknown response method: %s", res.Method)
+		return nil
+	}
+}
+
+func (s *Server) handleIdentifiersResponse(msg models.Message, res models.Response) error {
+	// Parse the identifier body
+	bodyBytes, err := json.Marshal(res.Payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal body: %w", err)
+	}
+
+	var id string
+	if err := json.Unmarshal(bodyBytes, &id); err != nil {
+		return fmt.Errorf("failed to unmarshal identifier body: %w", err)
+	}
+
+	log.Printf(
+		"%s %s identified with ID: %s",
+		msg.SourceDevice, msg.SourceID, id,
+	)
+
+	// TODO: Store identifier in database
+	// TODO: Update status/registry
+
+	return nil
 }

@@ -1,11 +1,11 @@
 package models
 
-import "time"
+import "encoding/json"
 
-type ActionType string
+type Method string
 
 const (
-	ActionGetIdentifiers ActionType = "get_identifiers"
+	MethodGetIdentifiers Method = "GET_IDENTIFIERS"
 )
 
 type DeviceType string
@@ -16,31 +16,25 @@ const (
 	DeviceServer  = "server"
 )
 
-// Request represents a generic request over MQTT or RMQ
+type Message struct {
+	SourceID     string          `json:"source_id"`
+	SourceDevice DeviceType      `json:"source_device"`
+	Version      string          `json:"version"`
+	Payload      json.RawMessage `json:"payload"`
+}
+
 type Request struct {
-	ID           string            `json:"id"`             // Unique request ID for correlation
-	SourceID     string            `json:"source_id"`      // e.g., "gateway", "server", "client"
-	SourceDevice DeviceType        `json:"source_device"`  // the source devices type for routing
-	TargetID     string            `json:"target_id"`      // Optional target ID
-	TargetDevice DeviceType        `json:"target_device"`  // the target device we want
-	Action       ActionType        `json:"action"`         // What the recipient should do
-	Timestamp    time.Time         `json:"timestamp"`      // When the request was created
-	Headers      map[string]string `json:"headers"`        // Optional metadata (like content type, auth, etc.)
-	Body         any               `json:"body,omitempty"` // Payload, can be any struct
+	Method       string          `json:"method"`
+	TargetID     string          `json:"target_id"`
+	TargetDevice DeviceType      `json:"target_device"`
+	Payload      json.RawMessage `json:"payload"`
 }
 
 type Response struct {
-	ID           string     `json:"id"`
-	TargetID     string     `json:"target"`
-	TargetDevice DeviceType `json:"target_device"`
-	SourceID     string     `json:"source_id"`
-	SourceDevice DeviceType `json:"source_device"`
-	Action       ActionType `json:"action"`
-	Timestamp    time.Time  `json:"timestamp"`
-	Body         any        `json:"body,omitempty"`
-	Error        string     `json:"error,omitempty"`
-}
-
-type IdentifierBody struct {
-	ID string `json:"id"`
+	Method       string          `json:"method"`
+	TargetID     string          `json:"target_id"`
+	TargetDevice DeviceType      `json:"target_device"`
+	StatusCode   int             `json:"status_code,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	Payload      json.RawMessage `json:"payload,omitempty"`
 }

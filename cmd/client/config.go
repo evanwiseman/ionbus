@@ -4,11 +4,14 @@ import (
 	"os"
 
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/models"
 )
 
 type ClientConfig struct {
-	ID   string
-	MQTT config.MQTTConfig
+	ID      string
+	Device  models.DeviceType
+	Version string
+	MQTT    config.MQTTConfig
 }
 
 func LoadClientConfig() (*ClientConfig, error) {
@@ -19,7 +22,9 @@ func LoadClientConfig() (*ClientConfig, error) {
 	}
 
 	return &ClientConfig{
-		ID:   id,
-		MQTT: mqttConfig,
+		ID:      id,
+		Device:  models.DeviceClient,
+		Version: "1.0",
+		MQTT:    mqttConfig,
 	}, nil
 }

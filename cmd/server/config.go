@@ -4,12 +4,15 @@ import (
 	"os"
 
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/models"
 )
 
 type ServerConfig struct {
-	ID  string
-	RMQ config.RMQConfig
-	DB  config.DBConfig
+	ID      string
+	Device  models.DeviceType
+	Version string
+	RMQ     config.RMQConfig
+	DB      config.DBConfig
 }
 
 func LoadServerConfig() (*ServerConfig, error) {
@@ -25,8 +28,10 @@ func LoadServerConfig() (*ServerConfig, error) {
 	}
 
 	return &ServerConfig{
-		ID:  id,
-		RMQ: rmqConfig,
-		DB:  dbConfig,
+		ID:      id,
+		Device:  models.DeviceServer,
+		Version: "1.0",
+		RMQ:     rmqConfig,
+		DB:      dbConfig,
 	}, nil
 }

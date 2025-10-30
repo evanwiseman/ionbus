@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -15,18 +14,41 @@ import (
 // Server
 // ========================
 
-type ServerRMQ struct {
-	Conn         *amqp.Connection
-	DeadCh       *amqp.Channel
-	RequestFlow  *pubsub.RMQFlow
-	ResponseFlow *pubsub.RMQFlow
-}
-
 type Server struct {
 	Ctx context.Context
 	Cfg *ServerConfig
 	DB  *sql.DB
 	RMQ ServerRMQ
+}
+
+type ServerRMQ struct {
+	Conn               *amqp.Connection
+	DeadCh             *amqp.Channel
+	RequestPublisher   *pubsub.RMQPublisher
+	RequestSubscriber  *pubsub.RMQSubscriber
+	ResponsePublisher  *pubsub.RMQPublisher
+	ResponseSubscriber *pubsub.RMQSubscriber
+}
+
+func (s *ServerRMQ) Close() {
+	if s.DeadCh != nil {
+		s.DeadCh.Close()
+	}
+	if s.RequestPublisher != nil {
+		s.RequestPublisher.Close()
+	}
+	if s.RequestSubscriber != nil {
+		s.RequestSubscriber.Close()
+	}
+	if s.ResponsePublisher != nil {
+		s.ResponsePublisher.Close()
+	}
+	if s.ResponseSubscriber != nil {
+		s.ResponseSubscriber.Close()
+	}
+	if s.Conn != nil {
+		s.Conn.Close()
+	}
 }
 
 // Create a new server from the config passed in
@@ -70,12 +92,7 @@ func (s *Server) Start() error {
 
 // Close gracefully shuts down the server
 func (s *Server) Close() {
-	if s.RMQ.DeadCh != nil {
-		s.RMQ.DeadCh.Close()
-	}
-	if s.RMQ.Conn != nil {
-		s.RMQ.Conn.Close()
-	}
+	s.RMQ.Close()
 	if s.DB != nil {
 		s.DB.Close()
 	}
@@ -169,19 +186,21 @@ func (s *Server) setupRequests() error {
 	}
 
 	// Subscribe to requests
-	s.RMQ.RequestFlow = pubsub.NewRMQFlow(s.Ctx, pubCh, subCh)
-	if err := s.RMQ.RequestFlow.Sub.Subscribe(pubsub.RMQSubOpts{QueueName: name}); err != nil {
+	requestPublisher := pubsub.NewRMQPublisher(s.Ctx, pubCh)
+	s.RMQ.RequestPublisher = requestPublisher
+
+	requestSubscriber := pubsub.NewRMQSubscriber(s.Ctx, subCh)
+	if err := requestSubscriber.Subscribe(
+		pubsub.RMQSubOpts{
+			QueueName:     name,
+			PrefetchCount: 10,
+			AutoAck:       false,
+		},
+		s.HandlerRequests,
+	); err != nil {
 		return err
 	}
-
-	s.RMQ.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.RServerReqTRK(s.Cfg.ID, "#"),
-		s.HandleIdentifierRequest,
-	)
-	s.RMQ.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.RServerReqBRK("#"),
-		s.HandleIdentifierRequest,
-	)
+	s.RMQ.RequestSubscriber = requestSubscriber
 
 	return nil
 }
@@ -230,20 +249,21 @@ func (s *Server) setupResponses() error {
 		return err
 	}
 
-	// Subscribe to responses
-	s.RMQ.ResponseFlow = pubsub.NewRMQFlow(s.Ctx, pubCh, subCh)
-	if err := s.RMQ.ResponseFlow.Sub.Subscribe(
+	responsePublisher := pubsub.NewRMQPublisher(s.Ctx, pubCh)
+	s.RMQ.ResponsePublisher = responsePublisher
+
+	responseSubscriber := pubsub.NewRMQSubscriber(s.Ctx, subCh)
+	if err := responseSubscriber.Subscribe(
 		pubsub.RMQSubOpts{
-			QueueName: name,
+			QueueName:     name,
+			PrefetchCount: 10,
+			AutoAck:       false,
 		},
+		s.HandlerResponses,
 	); err != nil {
 		return err
 	}
-
-	s.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
-		pubsub.RServerResTRK(s.Cfg.ID, string(models.ActionGetIdentifiers)),
-		s.HandleIdentifierResponse,
-	)
+	s.RMQ.ResponseSubscriber = responseSubscriber
 
 	return nil
 }

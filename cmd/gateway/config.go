@@ -4,12 +4,15 @@ import (
 	"os"
 
 	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/models"
 )
 
 type GatewayConfig struct {
-	ID   string
-	MQTT config.MQTTConfig
-	RMQ  config.RMQConfig
+	ID      string
+	Device  models.DeviceType
+	Version string
+	MQTT    config.MQTTConfig
+	RMQ     config.RMQConfig
 }
 
 func LoadGatewayConfig() (*GatewayConfig, error) {
@@ -25,9 +28,11 @@ func LoadGatewayConfig() (*GatewayConfig, error) {
 	}
 
 	cfg := GatewayConfig{
-		ID:   id,
-		MQTT: mqttConfig,
-		RMQ:  rmqConfig,
+		ID:      id,
+		Device:  models.DeviceGateway,
+		Version: "1.0",
+		MQTT:    mqttConfig,
+		RMQ:     rmqConfig,
 	}
 
 	return &cfg, nil

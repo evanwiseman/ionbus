@@ -3,25 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
-
-type GatewayMQTT struct {
-	Client       mqtt.Client
-	RequestFlow  *pubsub.MQTTFlow
-	ResponseFlow *pubsub.MQTTFlow
-}
-
-type GatewayRMQ struct {
-	Conn         *amqp.Connection
-	DeadCh       *amqp.Channel
-	RequestFlow  *pubsub.RMQFlow
-	ResponseFlow *pubsub.RMQFlow
-}
 
 type Gateway struct {
 	Ctx  context.Context
@@ -30,7 +18,55 @@ type Gateway struct {
 	RMQ  *GatewayRMQ
 }
 
+type GatewayMQTT struct {
+	Client             mqtt.Client
+	RequestPublisher   *pubsub.MQTTPublisher
+	RequestSubscriber  *pubsub.MQTTSubscriber
+	ResponsePublisher  *pubsub.MQTTPublisher
+	ResponseSubscriber *pubsub.MQTTSubscriber
+}
+
+func (g *GatewayMQTT) Close() {
+	g.Client.Disconnect(250)
+}
+
+type GatewayRMQ struct {
+	Conn               *amqp.Connection
+	DeadCh             *amqp.Channel
+	RequestPublisher   *pubsub.RMQPublisher
+	RequestSubscriber  *pubsub.RMQSubscriber
+	ResponsePublisher  *pubsub.RMQPublisher
+	ResponseSubscriber *pubsub.RMQSubscriber
+}
+
+func (g *GatewayRMQ) Close() {
+	if g.DeadCh != nil {
+		g.DeadCh.Close()
+	}
+	if g.RequestPublisher != nil {
+		g.RequestPublisher.Close()
+	}
+	if g.RequestSubscriber != nil {
+		g.RequestSubscriber.Close()
+	}
+	if g.ResponsePublisher != nil {
+		g.ResponsePublisher.Close()
+	}
+	if g.ResponseSubscriber != nil {
+		g.ResponseSubscriber.Close()
+	}
+	if g.Conn != nil {
+		g.Conn.Close()
+	}
+}
+
 func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
+	gateway := &Gateway{
+		Ctx:  ctx,
+		Cfg:  cfg,
+		MQTT: &GatewayMQTT{},
+		RMQ:  &GatewayRMQ{},
+	}
 	// MQTT
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.GetUrl()).
@@ -38,9 +74,27 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 		SetCleanSession(cfg.MQTT.CleanSession).
 		SetClientID(cfg.ID).
 		SetUsername(cfg.MQTT.Username).
-		SetPassword(cfg.MQTT.Password)
+		SetPassword(cfg.MQTT.Password).
+		SetConnectionLostHandler(func(client mqtt.Client, err error) {
+			log.Printf("ERROR: MQTT connection lost: %v", err)
+		}).
+		SetOnConnectHandler(func(client mqtt.Client) {
+			log.Printf("INFO: MQTT connected successfully")
+			if err := gateway.setupMQTTRequests(); err != nil {
+				log.Printf("ERROR: Failed to setup MQTT requests: %v", err)
+			}
+			if err := gateway.setupMQTTResponses(); err != nil {
+				log.Printf("ERROR: Failed to setup MQTT responses: %v", err)
+			}
+		}).
+		SetReconnectingHandler(func(client mqtt.Client, opts *mqtt.ClientOptions) {
+			log.Printf("WARN: MQTT reconnecting...")
+		}).
+		SetAutoReconnect(true).
+		SetMaxReconnectInterval(10 * time.Second)
 
 	client := mqtt.NewClient(opts)
+	gateway.MQTT.Client = client
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
 		return nil, fmt.Errorf("failed to establish connection to mqtt: %w", token.Error())
 	}
@@ -50,22 +104,9 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to establish connection to rabbitmq: %w", err)
 	}
-
-	gateway := &Gateway{
-		Ctx: ctx,
-		Cfg: cfg,
-		MQTT: &GatewayMQTT{
-			Client: client,
-		},
-		RMQ: &GatewayRMQ{
-			Conn: conn,
-		},
-	}
+	gateway.RMQ.Conn = conn
 
 	// Setup infrastructure
-	if err := gateway.setupMQTT(); err != nil {
-		return nil, fmt.Errorf("failed to setup mqtt: %w", err)
-	}
 
 	if err := gateway.setupRMQ(); err != nil {
 		return nil, fmt.Errorf("failed to setup rabbitmq: %w", err)
@@ -81,66 +122,53 @@ func (g *Gateway) Start() error {
 }
 
 func (g *Gateway) Close() {
-	if g.MQTT.Client != nil {
-		g.MQTT.Client.Disconnect(250)
-	}
-	if g.RMQ.DeadCh != nil {
-		g.RMQ.DeadCh.Close()
-	}
-
-	if g.RMQ.Conn != nil {
-		g.RMQ.Conn.Close()
-	}
-}
-
-func (g *Gateway) setupMQTT() error {
-	g.setupMQTTRequests()
-	g.setupMQTTResponses()
-	return nil
+	g.MQTT.Close()
+	g.RMQ.Close()
 }
 
 func (g *Gateway) setupMQTTRequests() error {
-	g.MQTT.RequestFlow = pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
-	if err := g.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: pubsub.MGatewayReqT(g.Cfg.ID, "#"),
-		QoS:   byte(1),
-	}); err != nil {
+	requestPublisher := pubsub.NewMQTTPublisher(g.Ctx, g.MQTT.Client)
+	g.MQTT.RequestPublisher = requestPublisher
+
+	requestSubscriber := pubsub.NewMQTTSubscriber(g.Ctx, g.MQTT.Client)
+	if err := requestSubscriber.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MGatewayReqT(g.Cfg.ID, "#"),
+			QoS:   byte(1),
+		},
+		g.HandlerRequests,
+	); err != nil {
 		return err
 	}
-
-	g.MQTT.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.MGatewayReqT(g.Cfg.ID, string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierRequest,
-	)
-
-	if err := g.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: pubsub.MGatewayReqB("#"),
-		QoS:   byte(1),
-	}); err != nil {
+	if err := requestSubscriber.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MGatewayReqB("#"),
+			QoS:   byte(1),
+		},
+		g.HandlerRequests,
+	); err != nil {
 		return err
 	}
-
-	g.MQTT.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.MGatewayReqB(string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierRequest,
-	)
+	g.MQTT.RequestSubscriber = requestSubscriber
 
 	return nil
 }
 
 func (g *Gateway) setupMQTTResponses() error {
-	g.MQTT.ResponseFlow = pubsub.NewMQTTFlow(g.Ctx, g.MQTT.Client)
-	if err := g.MQTT.ResponseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: pubsub.MGatewayResT(g.Cfg.ID, "#"),
-		QoS:   byte(1),
-	}); err != nil {
-		return nil
-	}
+	responsePublisher := pubsub.NewMQTTPublisher(g.Ctx, g.MQTT.Client)
+	g.MQTT.ResponsePublisher = responsePublisher
 
-	g.MQTT.ResponseFlow.Sub.Mux.HandleFunc(
-		pubsub.MGatewayResT(g.Cfg.ID, string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierResponse,
-	)
+	responseSubscriber := pubsub.NewMQTTSubscriber(g.Ctx, g.MQTT.Client)
+	if err := responseSubscriber.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MGatewayResT(g.Cfg.ID, "#"),
+			QoS:   byte(1),
+		},
+		g.HandlerResponses,
+	); err != nil {
+		return err
+	}
+	g.MQTT.ResponseSubscriber = responseSubscriber
 
 	return nil
 }
@@ -229,19 +257,19 @@ func (g *Gateway) setupRMQRequests() error {
 		return err
 	}
 
-	g.RMQ.RequestFlow = pubsub.NewRMQFlow(g.Ctx, pubCh, subCh)
-	if err := g.RMQ.RequestFlow.Sub.Subscribe(pubsub.RMQSubOpts{QueueName: name}); err != nil {
-		return err
-	}
+	requestPublisher := pubsub.NewRMQPublisher(g.Ctx, pubCh)
+	g.RMQ.RequestPublisher = requestPublisher
 
-	g.RMQ.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.RGatewayReqTRK(g.Cfg.ID, string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierRequest,
+	requestSubscriber := pubsub.NewRMQSubscriber(g.Ctx, subCh)
+	requestSubscriber.Subscribe(
+		pubsub.RMQSubOpts{
+			QueueName:     name,
+			PrefetchCount: 10,
+			AutoAck:       false,
+		},
+		g.HandlerRequests,
 	)
-	g.RMQ.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.RGatewayReqBRK(string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierRequest,
-	)
+	g.RMQ.RequestSubscriber = requestSubscriber
 
 	return nil
 }
@@ -289,19 +317,34 @@ func (g *Gateway) setupRMQResponses() error {
 		return err
 	}
 
-	g.RMQ.ResponseFlow = pubsub.NewRMQFlow(g.Ctx, pubCh, subCh)
-	if err := g.RMQ.ResponseFlow.Sub.Subscribe(
+	responsePublisher := pubsub.NewRMQPublisher(g.Ctx, pubCh)
+	g.RMQ.ResponsePublisher = responsePublisher
+
+	responseSubscriber := pubsub.NewRMQSubscriber(g.Ctx, subCh)
+	if err := responseSubscriber.Subscribe(
 		pubsub.RMQSubOpts{
-			QueueName: name,
+			QueueName:     name,
+			PrefetchCount: 10,
+			AutoAck:       false,
 		},
+		g.HandlerResponses,
 	); err != nil {
 		return err
 	}
+	g.RMQ.ResponseSubscriber = responseSubscriber
 
-	g.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
-		pubsub.RGatewayResTRK(g.Cfg.ID, string(models.ActionGetIdentifiers)),
-		g.HandleIdentifierResponse,
-	)
+	// if err := g.RMQ.ResponseFlow.Sub.Subscribe(
+	// 	pubsub.RMQSubOpts{
+	// 		QueueName: name,
+	// 	},
+	// ); err != nil {
+	// 	return err
+	// }
+
+	// g.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
+	// 	pubsub.RGatewayResTRK(g.Cfg.ID, string(models.MethodGetIdentifiers)),
+	// 	g.HandleIdentifierResponse,
+	// )
 
 	return nil
 }

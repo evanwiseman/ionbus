@@ -3,25 +3,37 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
-
-type ClientMQTT struct {
-	Client       mqtt.Client
-	RequestFlow  *pubsub.MQTTFlow
-	ResponseFlow *pubsub.MQTTFlow
-}
 
 type Client struct {
 	Ctx  context.Context
 	Cfg  ClientConfig
-	MQTT ClientMQTT
+	MQTT *ClientMQTT
+}
+
+type ClientMQTT struct {
+	Client             mqtt.Client
+	RequestPublisher   *pubsub.MQTTPublisher
+	RequestSubscriber  *pubsub.MQTTSubscriber
+	ResponsePublisher  *pubsub.MQTTPublisher
+	ResponseSubscriber *pubsub.MQTTSubscriber
+}
+
+func (c *ClientMQTT) Close() {
+	c.Client.Disconnect(250)
 }
 
 func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
+	client := &Client{
+		Ctx:  ctx,
+		Cfg:  *cfg,
+		MQTT: &ClientMQTT{},
+	}
 	// MQTT
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.GetUrl()).
@@ -29,24 +41,29 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 		SetCleanSession(cfg.MQTT.CleanSession).
 		SetClientID(cfg.ID).
 		SetUsername(cfg.MQTT.Username).
-		SetPassword(cfg.MQTT.Password)
+		SetPassword(cfg.MQTT.Password).
+		SetConnectionLostHandler(func(client mqtt.Client, err error) {
+			log.Printf("ERROR: MQTT connection lost: %v", err)
+		}).
+		SetOnConnectHandler(func(c mqtt.Client) {
+			log.Printf("INFO: Client MQTT connected, setting up subscriptions...")
+			if err := client.setupRequests(); err != nil {
+				log.Printf("ERROR: Failed to setup MQTT requests: %v", err)
+			}
+			if err := client.setupResponses(); err != nil {
+				log.Printf("ERROR: Failed to setup MQTT responses: %v", err)
+			}
+		}).
+		SetReconnectingHandler(func(client mqtt.Client, opts *mqtt.ClientOptions) {
+			log.Printf("WARN: MQTT reconnecting...")
+		}).
+		SetAutoReconnect(true).
+		SetMaxReconnectInterval(10 * time.Second)
 
 	mqttClient := mqtt.NewClient(opts)
+	client.MQTT.Client = mqttClient
 	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		return nil, fmt.Errorf("failed to establish connection to mqtt: %w", token.Error())
-	}
-
-	client := &Client{
-		Ctx: ctx,
-		Cfg: *cfg,
-		MQTT: ClientMQTT{
-			Client: mqttClient,
-		},
-	}
-
-	// Setup Infrastructure
-	if err := client.setupMQTT(); err != nil {
-		return nil, fmt.Errorf("failed to setup mqtt: %w", err)
 	}
 
 	return client, nil
@@ -58,69 +75,52 @@ func (c *Client) Start() error {
 }
 
 func (c *Client) Close() {
-	if c.MQTT.Client != nil {
-		c.MQTT.Client.Disconnect(250)
-	}
-}
-
-func (c *Client) setupMQTT() error {
-	if err := c.setupRequests(); err != nil {
-		return fmt.Errorf("failed to setup commands: %w", err)
-	}
-
-	if err := c.setupResponses(); err != nil {
-		return fmt.Errorf("failed to setup response: %w", err)
-	}
-
-	return nil
+	c.MQTT.Close()
 }
 
 func (c *Client) setupRequests() error {
+	requestPublisher := pubsub.NewMQTTPublisher(c.Ctx, c.MQTT.Client)
+	c.MQTT.RequestPublisher = requestPublisher
 
-	c.MQTT.RequestFlow = pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
-
-	if err := c.MQTT.RequestFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: pubsub.MClientReqT(c.Cfg.ID, "#"),
-		QoS:   byte(1),
-	}); err != nil {
+	requestSubscriber := pubsub.NewMQTTSubscriber(c.Ctx, c.MQTT.Client)
+	if err := requestSubscriber.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MClientReqT(c.Cfg.ID, "#"),
+			QoS:   byte(1),
+		},
+		c.HandlerRequests,
+	); err != nil {
 		return err
 	}
-
-	if err := c.MQTT.RequestFlow.Sub.Subscribe(
+	if err := requestSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
 			Topic: pubsub.MClientReqB("#"),
 			QoS:   byte(1),
 		},
+		c.HandlerRequests,
 	); err != nil {
 		return err
 	}
-
-	c.MQTT.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.MClientReqT(c.Cfg.ID, string(models.ActionGetIdentifiers)),
-		c.HandleIdentifierRequest,
-	)
-
-	c.MQTT.RequestFlow.Sub.Mux.HandleFunc(
-		pubsub.MClientReqB(string(models.ActionGetIdentifiers)),
-		c.HandleIdentifierRequest,
-	)
+	c.MQTT.RequestSubscriber = requestSubscriber
 
 	return nil
 }
 
 func (c *Client) setupResponses() error {
-	c.MQTT.ResponseFlow = pubsub.NewMQTTFlow(c.Ctx, c.MQTT.Client)
-	if err := c.MQTT.ResponseFlow.Sub.Subscribe(pubsub.MQTTSubOpts{
-		Topic: pubsub.MClientResT(c.Cfg.ID, "#"),
-		QoS:   byte(1),
-	}); err != nil {
+	responsePublisher := pubsub.NewMQTTPublisher(c.Ctx, c.MQTT.Client)
+	c.MQTT.ResponsePublisher = responsePublisher
+
+	responseSubscriber := pubsub.NewMQTTSubscriber(c.Ctx, c.MQTT.Client)
+	if err := responseSubscriber.Subscribe(
+		pubsub.MQTTSubOpts{
+			Topic: pubsub.MClientResT(c.Cfg.ID, "#"),
+			QoS:   byte(1),
+		},
+		c.HandlerResponses,
+	); err != nil {
 		return err
 	}
-
-	c.MQTT.ResponseFlow.Sub.Mux.HandleFunc(
-		pubsub.MClientResT(c.Cfg.ID, string(models.ActionGetIdentifiers)),
-		c.HandleIdentifierResponse,
-	)
+	c.MQTT.ResponseSubscriber = responseSubscriber
 
 	return nil
 }

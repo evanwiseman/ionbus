@@ -1,54 +1,53 @@
 package main
 
 import (
-	"log"
-	"time"
+	"encoding/json"
+	"fmt"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 func (s *Server) SendGatewayRequest(req models.Request) error {
-	if req.ID == "" {
-		req.ID = uuid.NewString()
-	}
-	req.Timestamp = time.Now()
-
 	var exchange string
 	var key string
+
+	// Broadcast or targeted request
 	if req.TargetID == "*" || req.TargetID == "" {
 		exchange = pubsub.RGatewayReqBX()
-		key = pubsub.RGatewayReqBRK(string(models.ActionGetIdentifiers))
+		key = pubsub.RGatewayReqBRK(req.Method)
 	} else {
 		exchange = pubsub.RGatewayReqTX()
-		key = pubsub.RGatewayReqTRK(req.TargetID, string(models.ActionGetIdentifiers))
+		key = pubsub.RGatewayReqTRK(req.TargetID, req.Method)
 	}
 
-	log.Printf("Sending request to '%s' on '%s'", key, exchange)
-	if err := s.RMQ.RequestFlow.Pub.Publish(
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("error: failed to marshal request: %w", err)
+	}
+
+	msg := models.Message{
+		SourceID:     s.Cfg.ID,
+		SourceDevice: s.Cfg.Device,
+		Version:      s.Cfg.Version,
+		Payload:      payload,
+	}
+
+	return s.RMQ.RequestPublisher.Publish(
 		pubsub.RMQPubOpts{
 			Exchange: exchange,
 			Key:      key,
 		},
-		models.ContentJSON,
-		req,
-	); err != nil {
-		log.Printf("Failed to send request: %v", err)
-		return err
-	}
-
-	return nil
+		msg,
+	)
 }
 
 func (s *Server) RequestGatewayIdentifiers(gatewayID string) error {
 	req := models.Request{
-		ID:           uuid.NewString(),
-		SourceID:     s.Cfg.ID,
-		SourceDevice: models.DeviceServer,
+		Method:       string(models.MethodGetIdentifiers),
 		TargetID:     gatewayID,
 		TargetDevice: models.DeviceGateway,
-		Action:       models.ActionGetIdentifiers,
+		Payload:      nil,
 	}
 
 	return s.SendGatewayRequest(req)

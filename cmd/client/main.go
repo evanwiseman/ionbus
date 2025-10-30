@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -53,6 +54,8 @@ func run(ctx context.Context) {
 		log.Fatalf("failed to create new client: %v", err)
 	}
 	defer client.Close()
+
+	time.Sleep(500 * time.Millisecond)
 
 	// Start the client
 	if err := client.Start(); err != nil {

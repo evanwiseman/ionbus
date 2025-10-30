@@ -1,51 +1,49 @@
 package main
 
 import (
-	"log"
-	"time"
+	"encoding/json"
+	"fmt"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
-	"github.com/google/uuid"
 )
 
 func (c *Client) SendGatewayRequest(req models.Request) error {
-	if req.ID == "" {
-		req.ID = uuid.NewString()
-	}
-	req.Timestamp = time.Now()
-
 	var topic string
 	if req.TargetID == "+" || req.TargetID == "" {
-		topic = pubsub.MGatewayReqB(string(req.Action))
+		topic = pubsub.MGatewayReqB(req.Method)
 	} else {
-		topic = pubsub.MGatewayReqT(req.TargetID, string(req.Action))
+		topic = pubsub.MGatewayReqT(req.TargetID, req.Method)
 	}
 
-	log.Printf("Sending request to '%s'", topic)
-	if err := c.MQTT.RequestFlow.Pub.Publish(
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("error: failed to marshal request: %w", err)
+	}
+
+	msg := models.Message{
+		SourceID:     c.Cfg.ID,
+		SourceDevice: c.Cfg.Device,
+		Version:      c.Cfg.Version,
+		Payload:      payload,
+	}
+
+	return c.MQTT.RequestPublisher.Publish(
 		pubsub.MQTTPubOpts{
-			Topic: topic,
-			QoS:   byte(1),
+			Topic:    topic,
+			QoS:      byte(1),
+			Retained: false,
 		},
-		models.ContentJSON,
-		req,
-	); err != nil {
-		log.Printf("Failed to send request: %v", err)
-		return err
-	}
-
-	return nil
+		msg,
+	)
 }
 
 func (c *Client) RequestGatewayIdentifiers(gatewayID string) error {
 	req := models.Request{
-		ID:           uuid.NewString(),
-		SourceID:     c.Cfg.ID,
-		SourceDevice: models.DeviceClient,
+		Method:       string(models.MethodGetIdentifiers),
 		TargetID:     gatewayID,
 		TargetDevice: models.DeviceGateway,
-		Action:       models.ActionGetIdentifiers,
+		Payload:      nil,
 	}
 
 	return c.SendGatewayRequest(req)
