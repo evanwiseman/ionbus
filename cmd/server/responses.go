@@ -23,8 +23,8 @@ func (s *Server) SendGatewayResponse(res models.Response) error {
 	}
 
 	// Determine routing
-	exchange := pubsub.RGatewayResTX()
-	key := pubsub.RGatewayResTRK(res.TargetID, res.Method)
+	exchange := pubsub.RMQTopicX(res.TargetDevice, models.ActionResponse)
+	key := pubsub.RMQTopicRK(res.TargetDevice, res.TargetID, models.ActionResponse, res.Method)
 	return s.RMQ.ResponsePublisher.Publish(
 		pubsub.RMQPubOpts{
 			Exchange: exchange,

@@ -51,7 +51,7 @@ func (c *Client) handleGetIdentifiers(msg models.Message, req models.Request) er
 
 	switch msg.SourceDevice {
 	case models.DeviceGateway:
-		return c.SendGatewayResponse(res)
+		return c.SendResponse(res)
 	default:
 		return fmt.Errorf("error: unsupported source")
 	}

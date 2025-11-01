@@ -12,11 +12,11 @@ func (g *Gateway) SendServerRequest(req models.Request) error {
 	var exchange string
 	var key string
 	if req.TargetID == "*" || req.TargetID == "" {
-		exchange = pubsub.RServerReqBX()
-		key = pubsub.RServerReqBRK(req.Method)
+		exchange = pubsub.RMQBroadcastX(req.TargetDevice, models.ActionRequest)
+		key = pubsub.RMQBroadcastRK(req.TargetDevice, models.ActionRequest, req.Method)
 	} else {
-		exchange = pubsub.RServerReqTX()
-		key = pubsub.RServerReqTRK(req.TargetID, req.Method)
+		exchange = pubsub.RMQTopicX(req.TargetDevice, models.ActionRequest)
+		key = pubsub.RMQTopicRK(req.TargetDevice, req.TargetID, models.ActionRequest, req.Method)
 	}
 
 	payload, err := json.Marshal(req)
@@ -54,9 +54,9 @@ func (g *Gateway) RequestServerIdentifiers(serverID string) error {
 func (g *Gateway) SendClientRequest(req models.Request) error {
 	var topic string
 	if req.TargetID == "+" || req.TargetID == "" {
-		topic = pubsub.MClientReqB(req.Method)
+		topic = pubsub.MQTTBroadcast(req.TargetDevice, models.ActionRequest, req.Method)
 	} else {
-		topic = pubsub.MClientReqT(req.TargetID, req.Method)
+		topic = pubsub.MQTTTopic(req.TargetDevice, req.TargetID, models.ActionRequest, req.Method)
 	}
 
 	payload, err := json.Marshal(req)

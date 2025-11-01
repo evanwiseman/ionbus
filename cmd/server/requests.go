@@ -14,11 +14,11 @@ func (s *Server) SendGatewayRequest(req models.Request) error {
 
 	// Broadcast or targeted request
 	if req.TargetID == "*" || req.TargetID == "" {
-		exchange = pubsub.RGatewayReqBX()
-		key = pubsub.RGatewayReqBRK(req.Method)
+		exchange = pubsub.RMQBroadcastX(req.TargetDevice, models.ActionRequest)
+		key = pubsub.RMQBroadcastRK(req.TargetDevice, models.ActionRequest, req.Method)
 	} else {
-		exchange = pubsub.RGatewayReqTX()
-		key = pubsub.RGatewayReqTRK(req.TargetID, req.Method)
+		exchange = pubsub.RMQTopicX(req.TargetDevice, models.ActionRequest)
+		key = pubsub.RMQTopicRK(req.TargetDevice, req.TargetID, models.ActionRequest, req.Method)
 	}
 
 	payload, err := json.Marshal(req)

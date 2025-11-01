@@ -1,0 +1,65 @@
+name: ionbus
+
+services:
+  # ========================
+  # MQTT Broker (Shared)
+  # ========================
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.15
+    container_name: ionbus_mqtt
+    ports:
+      - "1883:1883"  # MQTT port
+      - "9001:9001"  # WebSocket port
+    volumes:
+      - ./docker/gateway/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    restart: unless-stopped
+
+  # ========================
+  # Server Dependencies
+  # ========================
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: ionbus_rmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:15
+    container_name: ionbus_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ionbus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ionbus}
+      POSTGRES_DB: ${POSTGRES_DB:-ionbus}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ionbus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ========================
+# Volumes
+# ========================
+volumes:
+  rabbitmq_data:
+  postgres_data:
+  mqtt_data:
+  mqtt_log:

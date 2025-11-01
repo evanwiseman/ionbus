@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -140,15 +141,31 @@ func (s *Server) setupRequests() error {
 	}
 
 	// Ensure the server has a request exchange
-	if err := pubsub.DeclareServerCommandTopicX(pubCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQTopicX(s.Cfg.Device, models.ActionRequest),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s topic exchange: %w", s.Cfg.Device, models.ActionRequest, err)
 	}
-	if err := pubsub.DeclareServerCommandBroadcastX(pubCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQBroadcastX(s.Cfg.Device, models.ActionRequest),
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s broadcast exchange: %w", s.Cfg.Device, models.ActionRequest, err)
 	}
 
 	// Queue Parameters
-	name := pubsub.RServerReqQ(s.Cfg.ID)
+	name := pubsub.RMQQueue(s.Cfg.Device, s.Cfg.ID, models.ActionRequest)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -169,8 +186,8 @@ func (s *Server) setupRequests() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RServerReqTRK(s.Cfg.ID, "#"),
-		pubsub.RServerReqTX(),
+		pubsub.RMQTopicRK(s.Cfg.Device, s.Cfg.ID, models.ActionRequest, "#"),
+		pubsub.RMQTopicX(s.Cfg.Device, models.ActionRequest),
 	); err != nil {
 		return err
 	}
@@ -179,8 +196,8 @@ func (s *Server) setupRequests() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RServerReqBRK("#"),
-		pubsub.RServerReqBX(),
+		pubsub.RMQBroadcastRK(s.Cfg.Device, models.ActionRequest, "#"),
+		pubsub.RMQBroadcastX(s.Cfg.Device, models.ActionRequest),
 	); err != nil {
 		return err
 	}
@@ -217,12 +234,20 @@ func (s *Server) setupResponses() error {
 	}
 
 	// Ensure the server has a response exchange
-	if err := pubsub.DeclareServerResponseTopicX(subCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQTopicX(s.Cfg.Device, models.ActionResponse),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s topic exchange: %w", s.Cfg.Device, models.ActionResponse, err)
 	}
 
 	// Queue parameters
-	name := pubsub.RServerResQ(s.Cfg.ID)
+	name := pubsub.RMQQueue(s.Cfg.Device, s.Cfg.ID, models.ActionResponse)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -243,8 +268,8 @@ func (s *Server) setupResponses() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RServerResTRK(s.Cfg.ID, "#"),
-		pubsub.RServerResTX(),
+		pubsub.RMQTopicRK(s.Cfg.Device, s.Cfg.ID, models.ActionResponse, "#"),
+		pubsub.RMQTopicX(s.Cfg.Device, models.ActionResponse),
 	); err != nil {
 		return err
 	}

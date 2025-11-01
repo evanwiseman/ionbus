@@ -8,7 +8,7 @@ import (
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
-func (c *Client) SendGatewayResponse(res models.Response) error {
+func (c *Client) SendResponse(res models.Response) error {
 	// Marhsal the response
 	payload, err := json.Marshal(res)
 	if err != nil {
@@ -23,7 +23,7 @@ func (c *Client) SendGatewayResponse(res models.Response) error {
 	}
 
 	// Determine routing
-	topic := pubsub.MGatewayResT(res.TargetID, res.Method)
+	topic := pubsub.MQTTTopic(res.TargetDevice, res.TargetID, models.ActionResponse, res.Method)
 	return c.MQTT.ResponsePublisher.Publish(
 		pubsub.MQTTPubOpts{
 			Topic:    topic,

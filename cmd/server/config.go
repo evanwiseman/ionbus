@@ -9,7 +9,7 @@ import (
 
 type ServerConfig struct {
 	ID      string
-	Device  models.DeviceType
+	Device  models.Device
 	Version string
 	RMQ     config.RMQConfig
 	DB      config.DBConfig

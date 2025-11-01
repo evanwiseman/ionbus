@@ -10,5 +10,5 @@ RUN go build -o client ./cmd/client
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/client .
-COPY docker/client/.env .env
+COPY cmd/client/.env .env
 CMD ["./client"]

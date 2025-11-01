@@ -9,7 +9,7 @@ import (
 
 type GatewayConfig struct {
 	ID      string
-	Device  models.DeviceType
+	Device  models.Device
 	Version string
 	MQTT    config.MQTTConfig
 	RMQ     config.RMQConfig

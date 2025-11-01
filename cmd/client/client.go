@@ -7,6 +7,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
@@ -70,7 +71,8 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 }
 
 func (c *Client) Start() error {
-	c.RequestGatewayIdentifiers("+")
+	// Get all gateways
+	c.RequestIdentifiers(models.DeviceGateway, "+")
 	return nil
 }
 
@@ -85,16 +87,17 @@ func (c *Client) setupRequests() error {
 	requestSubscriber := pubsub.NewMQTTSubscriber(c.Ctx, c.MQTT.Client)
 	if err := requestSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MClientReqT(c.Cfg.ID, "#"),
+			Topic: pubsub.MQTTTopic(c.Cfg.Device, c.Cfg.ID, models.ActionRequest, "#"),
 			QoS:   byte(1),
 		},
 		c.HandlerRequests,
 	); err != nil {
 		return err
 	}
+
 	if err := requestSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MClientReqB("#"),
+			Topic: pubsub.MQTTBroadcast(c.Cfg.Device, models.ActionRequest, "#"),
 			QoS:   byte(1),
 		},
 		c.HandlerRequests,
@@ -113,7 +116,7 @@ func (c *Client) setupResponses() error {
 	responseSubscriber := pubsub.NewMQTTSubscriber(c.Ctx, c.MQTT.Client)
 	if err := responseSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MClientResT(c.Cfg.ID, "#"),
+			Topic: pubsub.MQTTTopic(c.Cfg.Device, c.Cfg.ID, models.ActionResponse, "#"),
 			QoS:   byte(1),
 		},
 		c.HandlerResponses,

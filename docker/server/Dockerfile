@@ -10,5 +10,5 @@ RUN go build -o server ./cmd/server
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/server .
-COPY docker/server/.env .env
+COPY cmd/server/.env .env
 CMD ["./server"]

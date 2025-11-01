@@ -9,7 +9,7 @@ import (
 
 type ClientConfig struct {
 	ID      string
-	Device  models.DeviceType
+	Device  models.Device
 	Version string
 	MQTT    config.MQTTConfig
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/models"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -133,7 +134,7 @@ func (g *Gateway) setupMQTTRequests() error {
 	requestSubscriber := pubsub.NewMQTTSubscriber(g.Ctx, g.MQTT.Client)
 	if err := requestSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MGatewayReqT(g.Cfg.ID, "#"),
+			Topic: pubsub.MQTTTopic(g.Cfg.Device, g.Cfg.ID, models.ActionRequest, "#"),
 			QoS:   byte(1),
 		},
 		g.HandlerRequests,
@@ -142,7 +143,7 @@ func (g *Gateway) setupMQTTRequests() error {
 	}
 	if err := requestSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MGatewayReqB("#"),
+			Topic: pubsub.MQTTBroadcast(g.Cfg.Device, models.ActionRequest, "#"),
 			QoS:   byte(1),
 		},
 		g.HandlerRequests,
@@ -161,7 +162,7 @@ func (g *Gateway) setupMQTTResponses() error {
 	responseSubscriber := pubsub.NewMQTTSubscriber(g.Ctx, g.MQTT.Client)
 	if err := responseSubscriber.Subscribe(
 		pubsub.MQTTSubOpts{
-			Topic: pubsub.MGatewayResT(g.Cfg.ID, "#"),
+			Topic: pubsub.MQTTTopic(g.Cfg.Device, g.Cfg.ID, models.ActionResponse, "#"),
 			QoS:   byte(1),
 		},
 		g.HandlerResponses,
@@ -212,15 +213,31 @@ func (g *Gateway) setupRMQRequests() error {
 	}
 
 	// Declare Exchanges
-	if err := pubsub.DeclareGatewayCommandTopicX(subCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQTopicX(g.Cfg.Device, models.ActionRequest),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s topic exchange: %w", g.Cfg.Device, models.ActionRequest, err)
 	}
-	if err := pubsub.DeclareGatewayCommandBroadcastX(subCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQBroadcastX(g.Cfg.Device, models.ActionRequest),
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s broadcast exchange: %w", g.Cfg.Device, models.ActionRequest, err)
 	}
 
 	// Queue Parameters
-	name := pubsub.RGatewayReqQ(g.Cfg.ID)
+	name := pubsub.RMQQueue(g.Cfg.Device, g.Cfg.ID, models.ActionRequest)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -241,8 +258,8 @@ func (g *Gateway) setupRMQRequests() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RGatewayReqTRK(g.Cfg.ID, "#"),
-		pubsub.RGatewayReqTX(),
+		pubsub.RMQTopicRK(g.Cfg.Device, g.Cfg.ID, models.ActionRequest, "#'"),
+		pubsub.RMQTopicX(g.Cfg.Device, models.ActionRequest),
 	); err != nil {
 		return err
 	}
@@ -251,8 +268,8 @@ func (g *Gateway) setupRMQRequests() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RGatewayReqBRK("#"),
-		pubsub.RGatewayReqBX(),
+		pubsub.RMQBroadcastRK(g.Cfg.Device, models.ActionRequest, "#"),
+		pubsub.RMQBroadcastX(g.Cfg.Device, models.ActionRequest),
 	); err != nil {
 		return err
 	}
@@ -286,12 +303,20 @@ func (g *Gateway) setupRMQResponses() error {
 	}
 
 	// Declare the exchange
-	if err := pubsub.DeclareGatewayResponseTopicX(subCh); err != nil {
-		return err
+	if err := pubCh.ExchangeDeclare(
+		pubsub.RMQTopicX(g.Cfg.Device, models.ActionResponse),
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to declare %s %s topic exchange: %w", g.Cfg.Device, models.ActionResponse, err)
 	}
 
 	// Queue parameters
-	name := pubsub.RGatewayResQ(g.Cfg.ID)
+	name := pubsub.RMQQueue(g.Cfg.Device, g.Cfg.ID, models.ActionResponse)
 	opts := pubsub.QueueOpts{
 		Durable:    false,
 		AutoDelete: true,
@@ -311,8 +336,8 @@ func (g *Gateway) setupRMQResponses() error {
 	if err := pubsub.BindQueue(
 		subCh,
 		name,
-		pubsub.RGatewayResTRK(g.Cfg.ID, "#"),
-		pubsub.RGatewayResTX(),
+		pubsub.RMQTopicRK(g.Cfg.Device, g.Cfg.ID, models.ActionResponse, "#"),
+		pubsub.RMQTopicX(g.Cfg.Device, models.ActionResponse),
 	); err != nil {
 		return err
 	}
@@ -332,19 +357,6 @@ func (g *Gateway) setupRMQResponses() error {
 		return err
 	}
 	g.RMQ.ResponseSubscriber = responseSubscriber
-
-	// if err := g.RMQ.ResponseFlow.Sub.Subscribe(
-	// 	pubsub.RMQSubOpts{
-	// 		QueueName: name,
-	// 	},
-	// ); err != nil {
-	// 	return err
-	// }
-
-	// g.RMQ.ResponseFlow.Sub.Mux.HandleFunc(
-	// 	pubsub.RGatewayResTRK(g.Cfg.ID, string(models.MethodGetIdentifiers)),
-	// 	g.HandleIdentifierResponse,
-	// )
 
 	return nil
 }

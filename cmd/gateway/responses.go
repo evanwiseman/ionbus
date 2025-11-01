@@ -23,8 +23,8 @@ func (g *Gateway) SendServerResponse(res models.Response) error {
 	}
 
 	// Determine routing
-	exchange := pubsub.RServerResTX()
-	key := pubsub.RServerResTRK(res.TargetID, res.Method)
+	exchange := pubsub.RMQTopicX(res.TargetDevice, models.ActionResponse)
+	key := pubsub.RMQTopicRK(res.TargetDevice, res.TargetID, models.ActionResponse, res.Method)
 
 	return g.RMQ.ResponsePublisher.Publish(
 		pubsub.RMQPubOpts{
@@ -50,7 +50,7 @@ func (g *Gateway) SendClientResponse(res models.Response) error {
 	}
 
 	// Determine routing
-	topic := pubsub.MClientResT(res.TargetID, res.Method)
+	topic := pubsub.MQTTTopic(res.TargetDevice, res.TargetID, models.ActionResponse, res.Method)
 	return g.MQTT.ResponsePublisher.Publish(
 		pubsub.MQTTPubOpts{
 			Topic:    topic,

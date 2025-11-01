@@ -10,5 +10,5 @@ RUN go build -o gateway ./cmd/gateway
 FROM debian:bookworm-slim
 WORKDIR /app
 COPY --from=builder /app/gateway .
-COPY docker/gateway/.env .env
+COPY cmd/gateway/.env .env
 CMD ["./gateway"]

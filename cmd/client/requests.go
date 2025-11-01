@@ -8,12 +8,12 @@ import (
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
-func (c *Client) SendGatewayRequest(req models.Request) error {
+func (c *Client) SendRequest(req models.Request) error {
 	var topic string
 	if req.TargetID == "+" || req.TargetID == "" {
-		topic = pubsub.MGatewayReqB(req.Method)
+		topic = pubsub.MQTTBroadcast(req.TargetDevice, models.ActionRequest, req.Method)
 	} else {
-		topic = pubsub.MGatewayReqT(req.TargetID, req.Method)
+		topic = pubsub.MQTTTopic(req.TargetDevice, req.TargetID, models.ActionRequest, req.Method)
 	}
 
 	payload, err := json.Marshal(req)
@@ -38,13 +38,13 @@ func (c *Client) SendGatewayRequest(req models.Request) error {
 	)
 }
 
-func (c *Client) RequestGatewayIdentifiers(gatewayID string) error {
+func (c *Client) RequestIdentifiers(device models.Device, id string) error {
 	req := models.Request{
 		Method:       string(models.MethodGetIdentifiers),
-		TargetID:     gatewayID,
-		TargetDevice: models.DeviceGateway,
+		TargetID:     id,
+		TargetDevice: device,
 		Payload:      nil,
 	}
 
-	return c.SendGatewayRequest(req)
+	return c.SendRequest(req)
 }
