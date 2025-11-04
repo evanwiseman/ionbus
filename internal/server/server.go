@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/evanwiseman/ionbus/internal/models"
+	"github.com/evanwiseman/ionbus/internal/node"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -16,10 +17,26 @@ import (
 // ========================
 
 type Server struct {
+	node.Node
 	Ctx context.Context
 	Cfg *ServerConfig
 	DB  *sql.DB
 	RMQ ServerRMQ
+}
+
+// Start begins server operations
+func (s *Server) Start() error {
+	s.RequestGatewayIdentifiers("*")
+	return nil
+}
+
+// Stop gracefully shuts down the server
+func (s *Server) Stop() error {
+	s.RMQ.Close()
+	if s.DB != nil {
+		s.DB.Close()
+	}
+	return nil
 }
 
 type ServerRMQ struct {
@@ -83,20 +100,6 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	}
 
 	return server, nil
-}
-
-// Start begins server operations
-func (s *Server) Start() error {
-	s.RequestGatewayIdentifiers("*")
-	return nil
-}
-
-// Close gracefully shuts down the server
-func (s *Server) Close() {
-	s.RMQ.Close()
-	if s.DB != nil {
-		s.DB.Close()
-	}
 }
 
 // ========================

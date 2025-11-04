@@ -1,0 +1,50 @@
+version: "2"
+sql:
+  # Client SQLite configuration
+  - engine: "sqlite"
+    queries:
+      - "sql/queries/common/*.sql"
+      - "sql/queries/sqlite/*.sql"
+    schema: "sql/migrations/sqlite"
+    gen:
+      go:
+        package: "db"
+        out: "client/db"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+
+  # Gateway SQLite configuration
+  - engine: "sqlite"
+    queries:
+      - "sql/queries/common/*.sql"
+      - "sql/queries/sqlite/*.sql"
+    schema: "sql/migrations/sqlite"
+    gen:
+      go:
+        package: "db"
+        out: "gateway/db"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+
+  # Server PostgreSQL configuration
+  - engine: "postgresql"
+    queries:
+      - "sql/queries/common/*.sql"
+      - "sql/queries/postgres/*.sql"
+    schema: "sql/migrations/postgres"
+    gen:
+      go:
+        package: "db"
+        out: "server/db"
+        emit_json_tags: true
+        emit_prepared_queries: true
+        emit_interface: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        emit_pointers_for_null_types: false

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/evanwiseman/ionbus/internal/client"
 	"github.com/joho/godotenv"
 )
 
@@ -43,17 +44,17 @@ func run(ctx context.Context) {
 	if err := godotenv.Load("./cmd/client/.env"); err != nil {
 		log.Fatalf("Failed to load .env: %v", err)
 	}
-	cfg, err := LoadClientConfig()
+	cfg, err := client.LoadClientConfig()
 	if err != nil {
 		log.Fatalf("Failed to load cilent config: %v", err)
 	}
 
 	// Create a new client
-	client, err := NewClient(ctx, cfg)
+	client, err := client.NewClient(ctx, cfg)
 	if err != nil {
 		log.Fatalf("failed to create new client: %v", err)
 	}
-	defer client.Close()
+	defer client.Stop()
 
 	time.Sleep(500 * time.Millisecond)
 

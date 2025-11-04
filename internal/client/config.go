@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"os"
@@ -7,33 +7,24 @@ import (
 	"github.com/evanwiseman/ionbus/internal/models"
 )
 
-type GatewayConfig struct {
+type ClientConfig struct {
 	ID      string
 	Device  models.Device
 	Version string
 	MQTT    config.MQTTConfig
-	RMQ     config.RMQConfig
 }
 
-func LoadGatewayConfig() (*GatewayConfig, error) {
-	id := os.Getenv("GATEWAY_ID")
+func LoadClientConfig() (*ClientConfig, error) {
+	id := os.Getenv("CLIENT_ID")
 	mqttConfig, err := config.LoadMQTTConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	rmqConfig, err := config.LoadRMQConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := GatewayConfig{
+	return &ClientConfig{
 		ID:      id,
-		Device:  models.DeviceGateway,
+		Device:  models.DeviceClient,
 		Version: "1.0",
 		MQTT:    mqttConfig,
-		RMQ:     rmqConfig,
-	}
-
-	return &cfg, nil
+	}, nil
 }

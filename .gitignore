@@ -1,2 +1,10 @@
 .env
 /logs
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Don't ignore generated code
+!**/db/*.go

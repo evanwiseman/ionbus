@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -8,14 +8,14 @@ import (
 	"github.com/evanwiseman/ionbus/internal/models"
 )
 
-func (c *Client) HandlerRequests(data []byte) error {
-	// Unmarshal the message
+func (s *Server) HandlerRequests(data []byte) error {
+	// Unmarshal the message envelope
 	var msg models.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
-	// Unmarshal request
+	// Unmarshal the request payload
 	var req models.Request
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return fmt.Errorf("failed to unmarshal payload: %w", err)
@@ -23,20 +23,20 @@ func (c *Client) HandlerRequests(data []byte) error {
 
 	log.Printf(
 		"Received request: Method=%s, Source=%s (%s)",
-		req.Method, msg.SourceID, msg.SourceDevice,
-	)
+		req.Method, msg.SourceID, msg.SourceDevice)
 
+	// Route based on the method
 	switch models.Method(req.Method) {
 	case models.MethodGetIdentifiers:
-		return c.handleGetIdentifiers(msg, req)
+		return s.handleGetIdentifiers(msg, req)
 	default:
 		log.Printf("Unknown method: %s", req.Method)
 		return nil // Don't error on unknown methods, just ignore
 	}
 }
 
-func (c *Client) handleGetIdentifiers(msg models.Message, req models.Request) error {
-	payload, err := json.Marshal(c.Cfg.ID)
+func (s *Server) handleGetIdentifiers(msg models.Message, req models.Request) error {
+	payload, err := json.Marshal(s.Cfg.ID)
 	if err != nil {
 		return fmt.Errorf("error: failed to marshal id: %w", err)
 	}
@@ -49,21 +49,18 @@ func (c *Client) handleGetIdentifiers(msg models.Message, req models.Request) er
 		Payload:      payload,
 	}
 
-	switch msg.SourceDevice {
-	case models.DeviceGateway:
-		return c.SendResponse(res)
-	default:
-		return fmt.Errorf("error: unsupported source")
-	}
 	// Send the response
+	return s.SendGatewayResponse(res)
 }
 
-func (c *Client) HandlerResponses(data []byte) error {
+func (s *Server) HandlerResponses(data []byte) error {
+	// Unmarshal the message envelope
 	var msg models.Message
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
+	// Unmarshal the response payload
 	var res models.Response
 	if err := json.Unmarshal(msg.Payload, &res); err != nil {
 		return fmt.Errorf("failed to unmarshal response: %w", err)
@@ -74,14 +71,17 @@ func (c *Client) HandlerResponses(data []byte) error {
 		res.Method, msg.SourceID, msg.SourceDevice,
 	)
 
+	// Route based on the method
 	switch models.Method(res.Method) {
 	case models.MethodGetIdentifiers:
-		return c.handleIdentifiersResponse(msg, res)
+		return s.handleIdentifiersResponse(msg, res)
+	default:
+		log.Printf("Unknown response method: %s", res.Method)
+		return nil
 	}
-	return nil
 }
 
-func (c *Client) handleIdentifiersResponse(msg models.Message, res models.Response) error {
+func (s *Server) handleIdentifiersResponse(msg models.Message, res models.Response) error {
 	// Parse the identifier body
 	bodyBytes, err := json.Marshal(res.Payload)
 	if err != nil {

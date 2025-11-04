@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/evanwiseman/ionbus/internal/server"
 	"github.com/joho/godotenv"
 )
 
@@ -42,17 +43,17 @@ func run(ctx context.Context) {
 	if err := godotenv.Load("./cmd/server/.env"); err != nil {
 		log.Fatalf("Failed to load .env: %v", err)
 	}
-	cfg, err := LoadServerConfig()
+	cfg, err := server.LoadServerConfig()
 	if err != nil {
 		log.Fatalf("Failed to load server config: %v", err)
 	}
 
 	// Create a new server
-	server, err := NewServer(ctx, cfg)
+	server, err := server.NewServer(ctx, cfg)
 	if err != nil {
 		log.Fatalf("Failed to create new server: %v", err)
 	}
-	defer server.Close()
+	defer server.Stop()
 
 	// Start the server
 	if err := server.Start(); err != nil {

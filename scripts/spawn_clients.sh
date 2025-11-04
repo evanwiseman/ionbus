@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-NUM_CLIENTS=${1:-100}
+NUM_CLIENTS=${1:-1000}
 CLIENT_BINARY="./cmd/client/client"
 ENV_FILE="./cmd/client/.env"
 LOG_DIR="./logs/clients"
@@ -75,7 +75,7 @@ for i in $(seq 1 $NUM_CLIENTS); do
     echo -e "${GREEN}Started client ${i}/${NUM_CLIENTS}${NC} - ID: ${CLIENT_ID}, PID: ${CLIENT_PID}"
     
     # Small delay to avoid overwhelming the system
-    sleep 0.1
+    sleep 0.01
 done
 
 echo -e "\n${GREEN}All $NUM_CLIENTS clients started successfully!${NC}"

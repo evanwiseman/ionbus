@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/evanwiseman/ionbus/internal/gateway"
 	"github.com/joho/godotenv"
 )
 
@@ -41,16 +42,16 @@ func run(ctx context.Context) {
 	if err := godotenv.Load("./cmd/gateway/.env"); err != nil {
 		log.Fatalf("Failed to load .env: %v", err)
 	}
-	cfg, err := LoadGatewayConfig()
+	cfg, err := gateway.LoadGatewayConfig()
 	if err != nil {
 		log.Fatalf("Failed to load gateway config: %v", err)
 	}
 
-	gateway, err := NewGateway(ctx, cfg)
+	gateway, err := gateway.NewGateway(ctx, cfg)
 	if err != nil {
 		log.Fatalf("Failed to create gateway: %v", err)
 	}
-	defer gateway.Close()
+	defer gateway.Stop()
 
 	if err := gateway.Start(); err != nil {
 		log.Fatalf("Failed to start gateway: %v", err)

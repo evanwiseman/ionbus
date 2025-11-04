@@ -1,0 +1,1 @@
+docker compose --env-file ./cmd/client/.env --env-file ./cmd/gateway/.env --env-file ./cmd/server/.env up -d

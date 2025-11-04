@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"context"
@@ -8,13 +8,26 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
+	"github.com/evanwiseman/ionbus/internal/node"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 )
 
 type Client struct {
+	node.Node
 	Ctx  context.Context
 	Cfg  ClientConfig
 	MQTT *ClientMQTT
+}
+
+func (c *Client) Start() error {
+	// Get all gateways
+	c.RequestIdentifiers(models.DeviceGateway, "+")
+	return nil
+}
+
+func (c *Client) Stop() error {
+	c.MQTT.Close()
+	return nil
 }
 
 type ClientMQTT struct {
@@ -68,16 +81,6 @@ func NewClient(ctx context.Context, cfg *ClientConfig) (*Client, error) {
 	}
 
 	return client, nil
-}
-
-func (c *Client) Start() error {
-	// Get all gateways
-	c.RequestIdentifiers(models.DeviceGateway, "+")
-	return nil
-}
-
-func (c *Client) Close() {
-	c.MQTT.Close()
 }
 
 func (c *Client) setupRequests() error {

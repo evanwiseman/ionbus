@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -8,18 +8,32 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/evanwiseman/ionbus/internal/models"
+	"github.com/evanwiseman/ionbus/internal/node"
 	"github.com/evanwiseman/ionbus/internal/pubsub"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Gateway struct {
+	node.Node
 	Ctx  context.Context
 	Cfg  *GatewayConfig
-	MQTT *GatewayMQTT
-	RMQ  *GatewayRMQ
+	MQTT *MQTT
+	RMQ  *RMQ
 }
 
-type GatewayMQTT struct {
+func (g *Gateway) Start() error {
+	g.RequestServerIdentifiers("*")
+	g.RequestClientIdentifiers("+")
+	return nil
+}
+
+func (g *Gateway) Stop() error {
+	g.MQTT.Close()
+	g.RMQ.Close()
+	return nil
+}
+
+type MQTT struct {
 	Client             mqtt.Client
 	RequestPublisher   *pubsub.MQTTPublisher
 	RequestSubscriber  *pubsub.MQTTSubscriber
@@ -27,11 +41,11 @@ type GatewayMQTT struct {
 	ResponseSubscriber *pubsub.MQTTSubscriber
 }
 
-func (g *GatewayMQTT) Close() {
+func (g *MQTT) Close() {
 	g.Client.Disconnect(250)
 }
 
-type GatewayRMQ struct {
+type RMQ struct {
 	Conn               *amqp.Connection
 	DeadCh             *amqp.Channel
 	RequestPublisher   *pubsub.RMQPublisher
@@ -40,7 +54,7 @@ type GatewayRMQ struct {
 	ResponseSubscriber *pubsub.RMQSubscriber
 }
 
-func (g *GatewayRMQ) Close() {
+func (g *RMQ) Close() {
 	if g.DeadCh != nil {
 		g.DeadCh.Close()
 	}
@@ -65,8 +79,8 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 	gateway := &Gateway{
 		Ctx:  ctx,
 		Cfg:  cfg,
-		MQTT: &GatewayMQTT{},
-		RMQ:  &GatewayRMQ{},
+		MQTT: &MQTT{},
+		RMQ:  &RMQ{},
 	}
 	// MQTT
 	opts := mqtt.NewClientOptions().
@@ -114,17 +128,6 @@ func NewGateway(ctx context.Context, cfg *GatewayConfig) (*Gateway, error) {
 	}
 
 	return gateway, nil
-}
-
-func (g *Gateway) Start() error {
-	g.RequestServerIdentifiers("*")
-	g.RequestClientIdentifiers("+")
-	return nil
-}
-
-func (g *Gateway) Close() {
-	g.MQTT.Close()
-	g.RMQ.Close()
 }
 
 func (g *Gateway) setupMQTTRequests() error {
