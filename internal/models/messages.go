@@ -2,27 +2,6 @@ package models
 
 import "encoding/json"
 
-type CommandType string
-
-const (
-	CommandRequest  = "request"
-	CommandResponse = "response"
-)
-
-type MethodType string
-
-const (
-	MethodGetIdentifiers MethodType = "GET_IDENTIFIERS"
-)
-
-type DeviceType string
-
-const (
-	DeviceNode    = "node"
-	DeviceGateway = "gateway"
-	DeviceServer  = "server"
-)
-
 type Message struct {
 	SourceID     string          `json:"source_id"`
 	SourceDevice DeviceType      `json:"source_device"`
