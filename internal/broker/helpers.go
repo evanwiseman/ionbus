@@ -1,10 +1,63 @@
-package pubsub
+package broker
 
 import (
 	"fmt"
+	"log"
+	"time"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/evanwiseman/ionbus/internal/config"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
+
+func StartMQTT(cfg *config.MQTTConfig, clientID string) (client mqtt.Client, err error) {
+	opts := mqtt.NewClientOptions().
+		AddBroker(cfg.GetUrl()).
+		SetKeepAlive(cfg.KeepAlive).
+		SetCleanSession(cfg.CleanSession).
+		SetClientID(clientID).
+		SetUsername(cfg.Username).
+		SetPassword(cfg.Password).
+		SetConnectionLostHandler(func(client mqtt.Client, err error) {
+			log.Printf("ERROR: MQTT connection lost: %v", err)
+		}).
+		SetOnConnectHandler(func(c mqtt.Client) {
+			log.Printf("INFO: MQTT connected successfully")
+		}).
+		SetReconnectingHandler(func(client mqtt.Client, opts *mqtt.ClientOptions) {
+			log.Printf("WARN: MQTT reconnecting...")
+		}).
+		SetAutoReconnect(true).
+		SetMaxReconnectInterval(10 * time.Second)
+
+	client = mqtt.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		return nil, fmt.Errorf("error: unable to connect to mqtt: %w", token.Error())
+	}
+
+	return client, nil
+}
+
+func StartRMQ(cfg *config.RMQConfig) (conn *amqp.Connection, err error) {
+	conn, err = amqp.Dial(cfg.GetUrl())
+	if err != nil {
+		return nil, fmt.Errorf("error: unable to connect to rabbitmq: %w", err)
+	}
+
+	// Setup dead lettering
+	deadCh, err := OpenChannel(conn)
+	if err != nil {
+		return nil, err
+	}
+	if err := DeclareDLX(deadCh); err != nil {
+		return nil, err
+	}
+	if err := DeclareAndBindDLQ(deadCh); err != nil {
+		return nil, err
+	}
+
+	return conn, nil
+}
 
 type QueueOpts struct {
 	Durable    bool

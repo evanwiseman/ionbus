@@ -2,30 +2,30 @@ package models
 
 import "encoding/json"
 
-type Action string
+type CommandType string
 
 const (
-	ActionRequest  = "request"
-	ActionResponse = "response"
+	CommandRequest  = "request"
+	CommandResponse = "response"
 )
 
-type Method string
+type MethodType string
 
 const (
-	MethodGetIdentifiers Method = "GET_IDENTIFIERS"
+	MethodGetIdentifiers MethodType = "GET_IDENTIFIERS"
 )
 
-type Device string
+type DeviceType string
 
 const (
-	DeviceClient  = "client"
+	DeviceNode    = "node"
 	DeviceGateway = "gateway"
 	DeviceServer  = "server"
 )
 
 type Message struct {
 	SourceID     string          `json:"source_id"`
-	SourceDevice Device          `json:"source_device"`
+	SourceDevice DeviceType      `json:"source_device"`
 	Version      string          `json:"version"`
 	Payload      json.RawMessage `json:"payload"`
 }
@@ -33,14 +33,14 @@ type Message struct {
 type Request struct {
 	Method       string          `json:"method"`
 	TargetID     string          `json:"target_id"`
-	TargetDevice Device          `json:"target_device"`
+	TargetDevice DeviceType      `json:"target_device"`
 	Payload      json.RawMessage `json:"payload"`
 }
 
 type Response struct {
 	Method       string          `json:"method"`
 	TargetID     string          `json:"target_id"`
-	TargetDevice Device          `json:"target_device"`
+	TargetDevice DeviceType      `json:"target_device"`
 	StatusCode   int             `json:"status_code,omitempty"`
 	Error        string          `json:"error,omitempty"`
 	Payload      json.RawMessage `json:"payload,omitempty"`

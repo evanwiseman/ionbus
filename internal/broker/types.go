@@ -1,4 +1,4 @@
-package pubsub
+package broker
 
 type AckType int
 

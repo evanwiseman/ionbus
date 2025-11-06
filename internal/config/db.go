@@ -3,51 +3,46 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
 )
 
-type DBConfig struct {
-	Schema   string
+type PostgresConfig struct {
 	Host     string
-	Port     int
+	Port     string
 	Username string
 	Password string
-	Name     string
+	Database string
 	SSLMode  string
 }
 
-func (dbc DBConfig) GetUrl() string {
+func (c PostgresConfig) GetUrl() string {
 	return fmt.Sprintf(
-		"%v://%v:%v@%v:%v/%v@sslmode=%v",
-		dbc.Schema,
-		dbc.Username,
-		dbc.Password,
-		dbc.Host,
-		dbc.Port,
-		dbc.Name,
-		dbc.SSLMode,
+		"postgres://%v:%v@%v:%v/%v@sslmode=%v",
+		c.Username,
+		c.Password,
+		c.Host,
+		c.Port,
+		c.Database,
+		c.SSLMode,
 	)
 }
 
-func LoadDBConfig() (DBConfig, error) {
-	dbSchema := os.Getenv("DB_SCHEMA")
-	dbHost := os.Getenv("DB_HOST")
-	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
-	if err != nil {
-		return DBConfig{}, err
+func LoadPostgresConfig() *PostgresConfig {
+	return &PostgresConfig{
+		Host:     os.Getenv("POSTGRES_HOST"),
+		Port:     os.Getenv("POSTGRES_PORT"),
+		Username: os.Getenv("POSTGRES_USERNAME"),
+		Password: os.Getenv("POSTGRES_PASSWORD"),
+		Database: os.Getenv("POSTGRES_DATABASE"),
+		SSLMode:  os.Getenv("POSTGRES_SSLMODE"),
 	}
-	dbUsername := os.Getenv("DB_USERNAME")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbName := os.Getenv("DB_NAME")
-	dbSSLMode := os.Getenv("DB_SSLMODE")
+}
 
-	return DBConfig{
-		Schema:   dbSchema,
-		Host:     dbHost,
-		Port:     dbPort,
-		Username: dbUsername,
-		Password: dbPassword,
-		Name:     dbName,
-		SSLMode:  dbSSLMode,
-	}, nil
+type SQLiteConfig struct {
+	Path string
+}
+
+func LoadSQLiteConfig() *SQLiteConfig {
+	return &SQLiteConfig{
+		Path: os.Getenv("SQLITE_PATH"),
+	}
 }

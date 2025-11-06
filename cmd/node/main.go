@@ -8,12 +8,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/evanwiseman/ionbus/internal/client"
+	"github.com/evanwiseman/ionbus/internal/config"
+	"github.com/evanwiseman/ionbus/internal/services"
 	"github.com/joho/godotenv"
 )
 
 func cleanup() {
-	log.Println("Stopping ionbus client...")
+	log.Println("Stopping ionbus node...")
 }
 
 func main() {
@@ -38,31 +39,27 @@ func main() {
 }
 
 func run(ctx context.Context) {
-	log.Println("Starting ionbus client...")
+	log.Println("Starting ionbus node...")
 
 	// Load from .env update
-	if err := godotenv.Load("./cmd/client/.env"); err != nil {
+	if err := godotenv.Load("./cmd/node/.env"); err != nil {
 		log.Fatalf("Failed to load .env: %v", err)
 	}
-	cfg, err := client.LoadClientConfig()
+	cfg := config.LoadNodeConfig()
+	// Create a new node
+	node, err := services.NewNode(ctx, cfg)
 	if err != nil {
-		log.Fatalf("Failed to load cilent config: %v", err)
+		log.Fatalf("failed to create new node: %v", err)
 	}
-
-	// Create a new client
-	client, err := client.NewClient(ctx, cfg)
-	if err != nil {
-		log.Fatalf("failed to create new client: %v", err)
-	}
-	defer client.Stop()
+	defer node.Stop()
 
 	time.Sleep(500 * time.Millisecond)
 
-	// Start the client
-	if err := client.Start(); err != nil {
-		log.Fatalf("failed to start client: %v", err)
+	// Start the node
+	if err := node.Start(); err != nil {
+		log.Fatalf("failed to start node: %v", err)
 	}
-	log.Println("Successfully started ionbus client")
+	log.Println("Successfully started ionbus node")
 
 	// Wait for cancellation
 	<-ctx.Done()

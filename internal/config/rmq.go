@@ -9,39 +9,30 @@ import (
 type RMQConfig struct {
 	Schema   string
 	Host     string
-	Port     int
+	Port     string
 	Username string
 	Password string
 	VHost    string
 	TLS      bool
 }
 
-func (rmq RMQConfig) GetUrl() string {
-	return fmt.Sprintf("%v://%v:%v", rmq.Schema, rmq.Host, rmq.Port)
+func (c RMQConfig) GetUrl() string {
+	return fmt.Sprintf("%v://%v:%v", c.Schema, c.Host, c.Port)
 }
 
-func LoadRMQConfig() (RMQConfig, error) {
-	rmqSchema := os.Getenv("RMQ_SCHEMA")
-	rmqHost := os.Getenv("RMQ_HOST")
-	rmqPort, err := strconv.Atoi(os.Getenv("RMQ_PORT"))
+func LoadRMQConfig() *RMQConfig {
+	tls, err := strconv.ParseBool(os.Getenv("RMQ_TLS"))
 	if err != nil {
-		return RMQConfig{}, err
-	}
-	rmqUsername := os.Getenv("RMQ_USERNAME")
-	rmqPassword := os.Getenv("RMQ_PASSWORD")
-	rmqVHost := os.Getenv("RMQ_VHOST")
-	rmqTLS, err := strconv.ParseBool(os.Getenv("RMQ_TLS"))
-	if err != nil {
-		return RMQConfig{}, err
+		tls = false
 	}
 
-	return RMQConfig{
-		Schema:   rmqSchema,
-		Host:     rmqHost,
-		Port:     rmqPort,
-		Username: rmqUsername,
-		Password: rmqPassword,
-		VHost:    rmqVHost,
-		TLS:      rmqTLS,
-	}, nil
+	return &RMQConfig{
+		Schema:   os.Getenv("RMQ_SCHEMA"),
+		Host:     os.Getenv("RMQ_HOST"),
+		Port:     os.Getenv("RMQ_PORT"),
+		Username: os.Getenv("RMQ_USERNAME"),
+		Password: os.Getenv("RMQ_PASSWORD"),
+		VHost:    os.Getenv("RMQ_VHOST"),
+		TLS:      tls,
+	}
 }

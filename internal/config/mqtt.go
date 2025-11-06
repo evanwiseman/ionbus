@@ -10,8 +10,8 @@ import (
 type MQTTConfig struct {
 	Schema        string
 	Broker        string
-	Port          int
-	WebSocketPort int
+	Port          string
+	WebSocketPort string
 	Username      string
 	Password      string
 	QoS           byte
@@ -24,42 +24,29 @@ func (mc MQTTConfig) GetUrl() string {
 	return fmt.Sprintf("%v://%v:%v", mc.Schema, mc.Broker, mc.Port)
 }
 
-func LoadMQTTConfig() (MQTTConfig, error) {
-	mqttSchema := os.Getenv("MQTT_SCHEMA")
-	mqttBroker := os.Getenv("MQTT_BROKER")
-	mqttPort, err := strconv.Atoi(os.Getenv("MQTT_PORT"))
+func LoadMQTTConfig() *MQTTConfig {
+	qos, err := strconv.Atoi(os.Getenv("MQTT_QOS"))
 	if err != nil {
-		return MQTTConfig{}, err
+		qos = 1
 	}
-	mqttWebSocketPort, err := strconv.Atoi(os.Getenv("MQTT_WS_PORT"))
+	keepAlive, err := time.ParseDuration(os.Getenv("MQTT_KEEPALIVE"))
 	if err != nil {
-		return MQTTConfig{}, err
+		keepAlive = time.Duration(30 * time.Second)
 	}
-	mqttUsername := os.Getenv("MQTT_USERNAME")
-	mqttPassword := os.Getenv("MQTT_PASSWORD")
-	mqttQoSInt, err := strconv.Atoi(os.Getenv("MQTT_QOS"))
+	cleanSession, err := strconv.ParseBool(os.Getenv("MQTT_CLEAN_SESSION"))
 	if err != nil {
-		return MQTTConfig{}, err
-	}
-	mqttQoS := byte(mqttQoSInt)
-	mqttKeepAlive, err := time.ParseDuration(os.Getenv("MQTT_KEEPALIVE"))
-	if err != nil {
-		return MQTTConfig{}, err
-	}
-	mqttCleanSession, err := strconv.ParseBool(os.Getenv("MQTT_CLEAN_SESSION"))
-	if err != nil {
-		return MQTTConfig{}, err
+		cleanSession = false
 	}
 
-	return MQTTConfig{
-		Schema:        mqttSchema,
-		Broker:        mqttBroker,
-		Port:          mqttPort,
-		WebSocketPort: mqttWebSocketPort,
-		Username:      mqttUsername,
-		Password:      mqttPassword,
-		QoS:           mqttQoS,
-		KeepAlive:     mqttKeepAlive,
-		CleanSession:  mqttCleanSession,
-	}, nil
+	return &MQTTConfig{
+		Schema:        os.Getenv("MQTT_SCHEMA"),
+		Broker:        os.Getenv("MQTT_BROKER"),
+		Port:          os.Getenv("MQTT_PORT"),
+		WebSocketPort: os.Getenv("MQTT_WS_PORT"),
+		Username:      os.Getenv("MQTT_USERNAME"),
+		Password:      os.Getenv("MQTT_PASSWORD"),
+		QoS:           byte(qos),
+		KeepAlive:     keepAlive,
+		CleanSession:  cleanSession,
+	}
 }
