@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/evanwiseman/ionbus/internal/models"
 )
@@ -23,16 +24,26 @@ func (e *Executor) Execute(handler *models.Handler, input []byte) ([]byte, error
 	}
 	tmpFile.Close()
 
-	cmd := exec.Command(handler.Language, tmpFile.Name())
+	// Replace {file} placeholder in RunArgs with actual path
+	cmdStr := strings.Replace(handler.RunCommand, "{file}", tmpFile.Name(), 1)
+	tokens := tokenize(cleanText(cmdStr))
+	name := tokens[0]
+	args := tokens[1:]
+
+	cmd := exec.Command(name, args...)
 	cmd.Stdin = bytes.NewReader(input)
 
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	output, err := cmd.CombinedOutput()
+	if err != nil {
 		return nil, err
 	}
+	return output, nil
+}
 
-	return output.Bytes(), nil
+func cleanText(text string) string {
+	return strings.TrimSpace(text)
+}
+
+func tokenize(text string) []string {
+	return strings.Split(text, " ")
 }

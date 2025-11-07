@@ -5,9 +5,8 @@ import "github.com/google/uuid"
 type Handler struct {
 	ID         uuid.UUID `json:"id"`
 	Method     string    `json:"method"`
-	Language   string    `json:"language"`
+	RunCommand string    `json:"run_command"`
 	Extension  string    `json:"extension"`
-	Program    []byte    `json:"program"`
-	EntryPoint string    `json:"entry_point"`
-	Persistent bool      `json:"persistent"`
+	Program    []byte    `json:"program,omitempty"`
+	Version    string    `json:"version"`
 }

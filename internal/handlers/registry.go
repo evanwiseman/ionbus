@@ -11,6 +11,13 @@ type Registry struct {
 	mu       sync.RWMutex
 }
 
+func NewRegistry() Registry {
+	return Registry{
+		handlers: make(map[string]*models.Handler),
+		mu:       sync.RWMutex{},
+	}
+}
+
 func (r *Registry) Add(handler *models.Handler) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
